@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-white text-ink font-sans;
+    font-feature-settings: 'ss01' on, 'cv01' on;
+  }
+
+  /* Keyboard-focus ring for buttons/links — text inputs get their own
+     border/shadow focus treatment instead (see Input.tsx, composer), so a
+     second ring on top would clash and look broken on click. */
+  a:focus-visible,
+  button:focus-visible,
+  [role='button']:focus-visible {
+    @apply outline-none ring-2 ring-magenta-500 ring-offset-2 ring-offset-white;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+  }
+
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background: rgba(255, 27, 205, 0.18);
+    color: #0a0a0a;
+  }
+
+  /* Thin, quiet scrollbars — visible on hover only, never the dominant visual */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #d4d4d4 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: #e5e5e5;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *:hover::-webkit-scrollbar-thumb {
+    background-color: #d4d4d4;
+    background-clip: content-box;
+  }
+}
+
+@layer utilities {
+  .gradient-text {
+    background: linear-gradient(135deg, #ff3ad6 0%, #ff1bcd 55%, #b3078c 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

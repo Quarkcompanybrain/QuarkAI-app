@@ -188,7 +188,7 @@ function FileRow({ file }: { file: FileItem }) {
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {file.status === 'done' && (
-            <span className="flex items-center gap-3 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
+            <span className="flex items-center gap-3 opacity-70 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
               <button
                 onClick={handleToggleMemory}
                 className="flex items-center gap-1 text-xs font-medium text-neutral-500 transition-colors hover:text-magenta-600"

@@ -163,7 +163,7 @@ function SessionRow({
         <button
           onClick={startEditing}
           aria-label="Rename chat"
-          className="shrink-0 rounded-md p-1.5 text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-magenta-500 focus:opacity-100 group-hover:opacity-100"
+          className="shrink-0 rounded-md p-1.5 text-neutral-400 opacity-70 transition-opacity hover:bg-neutral-100 hover:text-magenta-500 focus:opacity-100 group-hover:opacity-100"
         >
           <PencilIcon className="h-3.5 w-3.5" />
         </button>

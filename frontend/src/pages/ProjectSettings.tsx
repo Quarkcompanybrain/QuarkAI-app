@@ -189,7 +189,7 @@ function MembersSection({ projectId }: { projectId: string }) {
             <button
               onClick={() => handleRemove(m.userId)}
               aria-label={`Remove ${m.email}`}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-400 opacity-0 transition-opacity duration-150 hover:text-magenta-500 focus-within:opacity-100 group-hover:opacity-100"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-400 opacity-70 transition-opacity duration-150 hover:text-magenta-500 focus-within:opacity-100 group-hover:opacity-100"
             >
               <TrashIcon className="h-3.5 w-3.5" />
             </button>

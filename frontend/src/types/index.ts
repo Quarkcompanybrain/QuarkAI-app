@@ -52,3 +52,30 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
 }
+
+export type IntegrationStatus = 'pending' | 'connected' | 'disconnected' | 'failed';
+
+export interface Integration {
+  id: string;
+  type: 'whatsapp';
+  status: IntegrationStatus;
+  phoneNumber: string | null;
+  lastConnectedAt: string | null;
+}
+
+export interface WhatsAppChat {
+  jid: string;
+  name: string;
+  isGroup: boolean;
+  lastMessageAt: string | null;
+}
+
+export interface ProjectSource {
+  id: string;
+  sourceType: 'whatsapp';
+  integrationId: string;
+  chatJid: string;
+  chatName: string;
+  isGroup: boolean;
+  addedBy: string;
+}

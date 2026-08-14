@@ -8,7 +8,7 @@ import { useAuthStore } from '../store/authStore';
 import { useChatListStore } from '../store/chatListStore';
 import { projectsApi } from '../features/projects/api';
 import { chatApi } from '../features/chat/api';
-import { ChatBubbleIcon, FolderIcon, LogoutIcon, MenuIcon, UserIcon, UsersIcon, XIcon } from './icons';
+import { ChatBubbleIcon, FolderIcon, LogoutIcon, MenuIcon, PlugIcon, UserIcon, UsersIcon, XIcon } from './icons';
 import type { ChatSessionSummary, Project } from '../types';
 
 const RECENT_CHATS_LIMIT = 5;
@@ -220,6 +220,12 @@ function SidebarBody({
 
       <nav className="flex flex-col gap-0.5">
         <SidebarLink to="/members" label="Members" icon={<UsersIcon />} active={location.pathname === '/members'} />
+        <SidebarLink
+          to="/integrations"
+          label="Integrations"
+          icon={<PlugIcon />}
+          active={location.pathname === '/integrations'}
+        />
       </nav>
 
       <Link

@@ -17,6 +17,26 @@ export function ChatBubbleIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function PlugIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M9 2v4M15 2v4" />
+      <path d="M7 6h10v4a5 5 0 0 1-5 5 5 5 0 0 1-5-5V6Z" />
+      <path d="M12 15v3M9 22h6" />
+    </svg>
+  );
+}
+
+export function AlertTriangleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3.5 21.5 20h-19L12 3.5Z" />
+      <path d="M12 10v4" />
+      <circle cx="12" cy="17.2" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function UserIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>

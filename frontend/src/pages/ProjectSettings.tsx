@@ -1,15 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useOutletContext, useParams } from 'react-router-dom';
+import { Link, useOutletContext, useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { projectsApi, type ProjectMember } from '../features/projects/api';
 import { orgApi } from '../features/org/api';
+import { integrationsApi } from '../features/integrations/api';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PlusIcon, TrashIcon } from '../components/icons';
 import { ApiRequestError } from '../lib/api';
-import type { Project } from '../types';
+import type { Integration, Project, ProjectSource, WhatsAppChat } from '../types';
 
 interface ProjectOutletContext {
   project: Project | null;
@@ -25,6 +26,7 @@ export function ProjectSettings() {
       <div className="mx-auto flex max-w-lg flex-col gap-6">
         <ProjectDetailsForm projectId={projectId} project={project} onRenamed={refreshProject} />
         <MembersSection projectId={projectId} />
+        <WhatsAppSourcesSection projectId={projectId} />
       </div>
     </div>
   );
@@ -196,6 +198,118 @@ function MembersSection({ projectId }: { projectId: string }) {
           </motion.li>
         ))}
       </ul>
+    </Card>
+  );
+}
+
+function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
+  const [connectedIntegrations, setConnectedIntegrations] = useState<Integration[]>([]);
+  const [chatsByIntegration, setChatsByIntegration] = useState<Record<string, WhatsAppChat[]>>({});
+  const [sources, setSources] = useState<ProjectSource[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refreshSources = () => projectsApi.listSources(projectId).then((r) => setSources(r.sources));
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([integrationsApi.list(), projectsApi.listSources(projectId)])
+      .then(async ([integrationsRes, sourcesRes]) => {
+        const connected = integrationsRes.integrations.filter((i) => i.status === 'connected');
+        setConnectedIntegrations(connected);
+        setSources(sourcesRes.sources);
+
+        const chatLists = await Promise.all(connected.map((i) => integrationsApi.listChats(i.id)));
+        const byIntegration: Record<string, WhatsAppChat[]> = {};
+        connected.forEach((integration, i) => {
+          byIntegration[integration.id] = chatLists[i].chats;
+        });
+        setChatsByIntegration(byIntegration);
+      })
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  const sourceKey = (integrationId: string, jid: string) => `${integrationId}:${jid}`;
+  const selectedKeys = new Set(sources.map((s) => sourceKey(s.integrationId, s.chatJid)));
+
+  const handleToggle = async (integrationId: string, chat: WhatsAppChat) => {
+    setError(null);
+    const key = sourceKey(integrationId, chat.jid);
+    try {
+      if (selectedKeys.has(key)) {
+        const existing = sources.find((s) => s.integrationId === integrationId && s.chatJid === chat.jid);
+        if (existing) await projectsApi.removeSource(projectId, existing.id);
+      } else {
+        await projectsApi.addSource(projectId, integrationId, chat.jid);
+      }
+      refreshSources();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  return (
+    <Card>
+      <h2 className="mb-1 font-display text-lg font-semibold text-ink">WhatsApp sources</h2>
+      <p className="mb-4 text-sm text-neutral-500">
+        Pick which of your connected chats and groups should feed this project's memory.
+      </p>
+
+      <ErrorBanner message={error} />
+
+      {loading ? (
+        <p className="text-sm text-neutral-500">Loading…</p>
+      ) : connectedIntegrations.length === 0 ? (
+        <p className="text-sm text-neutral-500">
+          No WhatsApp account connected yet.{' '}
+          <Link to="/integrations" className="font-medium text-magenta-600 hover:underline">
+            Connect one
+          </Link>{' '}
+          to start selecting chats.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {connectedIntegrations.map((integration) => (
+            <div key={integration.id}>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
+                {integration.phoneNumber || 'WhatsApp'}
+              </p>
+              {(chatsByIntegration[integration.id] || []).length === 0 ? (
+                <p className="text-sm text-neutral-500">No chats found on this account yet.</p>
+              ) : (
+                <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
+                  {(chatsByIntegration[integration.id] || []).map((chat) => {
+                    const checked = selectedKeys.has(sourceKey(integration.id, chat.jid));
+                    return (
+                      <li key={chat.jid} className="flex items-center justify-between px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-ink">{chat.name || chat.jid}</p>
+                          <p className="text-xs text-neutral-500">{chat.isGroup ? 'Group' : 'Individual chat'}</p>
+                        </div>
+                        <button
+                          role="switch"
+                          aria-checked={checked}
+                          onClick={() => handleToggle(integration.id, chat)}
+                          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                            checked ? 'bg-magenta-500' : 'bg-neutral-200'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                              checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+                            }`}
+                          />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

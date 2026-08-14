@@ -9,6 +9,7 @@ const morgan = require('morgan');
 const { connectDb, ensureVectorIndex } = require('./src/config/db');
 const routes = require('./src/routes');
 const { errorHandler } = require('./src/middleware/errorHandler');
+const { reconnectAllActiveIntegrations } = require('./src/services/whatsapp/connectionManager');
 
 const app = express();
 
@@ -38,6 +39,10 @@ async function start() {
   app.listen(env.port, () => {
     console.log(`[server] listening on http://localhost:${env.port}`);
     Sentry.logger.info('Server started', { port: env.port, env: env.nodeEnv });
+  });
+  reconnectAllActiveIntegrations().catch((err) => {
+    console.error('[whatsapp] failed to reconnect existing integrations', err);
+    Sentry.captureException(err, { tags: { pipeline: 'whatsapp_boot_reconnect' } });
   });
 }
 

@@ -6,12 +6,13 @@ import { ForgotPassword } from './pages/ForgotPassword';
 import { AcceptInvite } from './pages/AcceptInvite';
 import { ChatsHistory } from './pages/ChatsHistory';
 import { Profile } from './pages/Profile';
+import { Integrations } from './pages/Integrations';
 import { PersonalLayout } from './pages/PersonalLayout';
 import { PersonalChat } from './pages/PersonalChat';
 import { PersonalFiles } from './pages/PersonalFiles';
 import { ProjectLayout } from './pages/ProjectLayout';
 import { ProjectChat } from './pages/ProjectChat';
-import { ProjectFiles } from './pages/ProjectFiles';
+import { ProjectMemory } from './pages/ProjectMemory';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { Members } from './pages/Members';
 import { useAuthStore } from './store/authStore';
@@ -60,12 +61,13 @@ export default function App() {
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<Navigate to="chat" replace />} />
             <Route path="chat" element={<ProjectChat />} />
-            <Route path="files" element={<ProjectFiles />} />
+            <Route path="memory" element={<ProjectMemory />} />
             <Route path="settings" element={<ProjectSettings />} />
           </Route>
 
           <Route path="/members" element={<Members />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/integrations" element={<Integrations />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

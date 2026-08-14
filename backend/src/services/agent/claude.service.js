@@ -54,4 +54,22 @@ async function generateChatTitle(firstMessage) {
   return title && title.length > 0 ? title.slice(0, 80) : null;
 }
 
-module.exports = { streamAnswer, generateChatTitle };
+/**
+ * Cheap Haiku gate for WhatsApp ingestion: most messages in a group chat are
+ * small talk ("ok", "👍", "call you in 5") — this decides whether a given
+ * message is worth turning into a permanent memory chunk for a project,
+ * before we spend an embedding + storage write on it.
+ */
+async function isMessageRelevantToProject({ projectName, message }) {
+  const response = await anthropic.messages.create({
+    model: env.anthropicChunkModel,
+    max_tokens: 5,
+    system: `You decide whether a WhatsApp message is worth permanently remembering as company knowledge for the project "${projectName}". Say YES only if the message contains a real fact, decision, update, instruction, or piece of information someone might later search for. Say NO for greetings, acknowledgements, small talk, emoji-only reactions, or anything without lasting informational value. Respond with ONLY "YES" or "NO".`,
+    messages: [{ role: 'user', content: message }],
+  });
+
+  const textBlock = response.content.find((block) => block.type === 'text');
+  return textBlock?.text?.trim().toUpperCase().startsWith('YES') || false;
+}
+
+module.exports = { streamAnswer, generateChatTitle, isMessageRelevantToProject };

@@ -1,5 +1,5 @@
 import { api } from '../../lib/api';
-import type { Project } from '../../types';
+import type { Project, ProjectSource } from '../../types';
 
 export interface ProjectMember {
   userId: string;
@@ -25,4 +25,15 @@ export const projectsApi = {
 
   removeMember: (projectId: string, userId: string) =>
     api.delete<{ message: string }>(`/projects/${projectId}/members/${userId}`),
+
+  listSources: (projectId: string) => api.get<{ sources: ProjectSource[] }>(`/projects/${projectId}/sources`),
+
+  addSource: (projectId: string, integrationId: string, chatJid: string) =>
+    api.post<{ source: { id: string; chatName: string } }>(`/projects/${projectId}/sources`, {
+      integrationId,
+      chatJid,
+    }),
+
+  removeSource: (projectId: string, sourceId: string) =>
+    api.delete<{ message: string }>(`/projects/${projectId}/sources/${sourceId}`),
 };

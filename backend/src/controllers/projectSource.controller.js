@@ -5,6 +5,8 @@ const WhatsAppChat = require('../models/WhatsAppChat');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
+const MAX_SOURCES_PER_PROJECT = 10;
+
 const listSources = asyncHandler(async (req, res) => {
   const sources = await ProjectSource.find({ projectId: req.projectId });
   res.json({
@@ -35,6 +37,11 @@ const addSource = asyncHandler(async (req, res) => {
 
   const existing = await ProjectSource.findOne({ projectId: req.projectId, integrationId, chatJid });
   if (existing) throw new ApiError(409, 'This chat is already a source for this project.');
+
+  const sourceCount = await ProjectSource.countDocuments({ projectId: req.projectId });
+  if (sourceCount >= MAX_SOURCES_PER_PROJECT) {
+    throw new ApiError(409, `A project can have at most ${MAX_SOURCES_PER_PROJECT} connected chats/groups.`);
+  }
 
   const source = await ProjectSource.create({
     projectId: req.projectId,

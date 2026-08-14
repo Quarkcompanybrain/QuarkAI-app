@@ -1,11 +1,8 @@
 const Sentry = require('@sentry/node');
 const ProjectSource = require('../../models/ProjectSource');
-const Project = require('../../models/Project');
 const Integration = require('../../models/Integration');
 const WhatsAppChat = require('../../models/WhatsAppChat');
-const { isMessageRelevantToProject } = require('../agent/claude.service');
-const { embedText } = require('../embeddings/openai.service');
-const { insertChunks } = require('../vectorstore/atlas.service');
+const { decideAndStore } = require('../memory/ingest.service');
 
 function extractText(message) {
   const m = message.message;
@@ -23,6 +20,9 @@ function extractText(message) {
  * Runs on every inbound WhatsApp message. Cheap early-exits (no text, no
  * project has subscribed to this chat) before ever calling Haiku, since most
  * messages across all connected accounts will hit neither project's radar.
+ * The actual save/skip/edit decision is delegated to the same decideAndStore
+ * used for file ingestion, so both sources dedupe and update each other
+ * identically.
  */
 async function handleIncomingMessage(integrationId, message) {
   const text = extractText(message)?.trim();
@@ -49,36 +49,28 @@ async function handleIncomingMessage(integrationId, message) {
 
   for (const source of sources) {
     try {
-      const project = await Project.findById(source.projectId);
-      if (!project) continue;
-
-      const relevant = await isMessageRelevantToProject({ projectName: project.name, message: text });
-      if (!relevant) continue;
-
-      const embedding = await embedText(text);
-      await insertChunks([
-        {
-          sourceType: 'whatsapp',
-          fileId: null,
-          orgId: source.orgId,
-          projectId: source.projectId,
-          ownerId: integration.userId,
-          text,
-          embedding,
-          metadata: {
-            integrationId: integration._id,
-            chatJid,
-            chatName: source.chatName,
-            sender,
-            messageTimestamp,
-          },
+      const outcome = await decideAndStore({
+        orgId: source.orgId,
+        projectId: source.projectId,
+        ownerId: integration.userId,
+        sourceType: 'whatsapp',
+        text,
+        metadata: {
+          integrationId: integration._id,
+          chatJid,
+          chatName: source.chatName,
+          sender,
+          messageTimestamp,
         },
-      ]);
-
-      Sentry.logger.info('WhatsApp message ingested', {
-        projectId: String(source.projectId),
-        chatJid,
       });
+
+      if (outcome.action !== 'skipped') {
+        Sentry.logger.info('WhatsApp message ingested', {
+          projectId: String(source.projectId),
+          chatJid,
+          action: outcome.action,
+        });
+      }
     } catch (err) {
       Sentry.captureException(err, {
         tags: { pipeline: 'whatsapp_ingest_project' },

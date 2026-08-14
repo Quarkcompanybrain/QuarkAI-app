@@ -230,8 +230,10 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  const MAX_SOURCES = 10;
   const sourceKey = (integrationId: string, jid: string) => `${integrationId}:${jid}`;
   const selectedKeys = new Set(sources.map((s) => sourceKey(s.integrationId, s.chatJid)));
+  const atLimit = sources.length >= MAX_SOURCES;
 
   const handleToggle = async (integrationId: string, chat: WhatsAppChat) => {
     setError(null);
@@ -251,9 +253,15 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
 
   return (
     <Card>
-      <h2 className="mb-1 font-display text-lg font-semibold text-ink">WhatsApp sources</h2>
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-semibold text-ink">WhatsApp sources</h2>
+        <span className={`text-xs font-medium ${atLimit ? 'text-magenta-600' : 'text-neutral-400'}`}>
+          {sources.length}/{MAX_SOURCES} connected
+        </span>
+      </div>
       <p className="mb-4 text-sm text-neutral-500">
-        Pick which of your connected chats and groups should feed this project's memory.
+        Pick which of your connected chats and groups should feed this project's memory. Up to {MAX_SOURCES} per
+        project.
       </p>
 
       <ErrorBanner message={error} />
@@ -281,6 +289,7 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
                 <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
                   {(chatsByIntegration[integration.id] || []).map((chat) => {
                     const checked = selectedKeys.has(sourceKey(integration.id, chat.jid));
+                    const disabled = !checked && atLimit;
                     return (
                       <li key={chat.jid} className="flex items-center justify-between px-4 py-3">
                         <div className="min-w-0">
@@ -290,10 +299,11 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
                         <button
                           role="switch"
                           aria-checked={checked}
+                          disabled={disabled}
                           onClick={() => handleToggle(integration.id, chat)}
                           className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
                             checked ? 'bg-magenta-500' : 'bg-neutral-200'
-                          }`}
+                          } ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
                         >
                           <span
                             className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${

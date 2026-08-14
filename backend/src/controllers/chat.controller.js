@@ -1,8 +1,6 @@
 const Sentry = require('@sentry/node');
 const ChatSession = require('../models/ChatSession');
 const Message = require('../models/Message');
-const { embedText } = require('../services/embeddings/openai.service');
-const { searchChunks } = require('../services/vectorstore/atlas.service');
 const { streamAnswer, generateChatTitle } = require('../services/agent/claude.service');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
@@ -82,20 +80,7 @@ const sendMessage = asyncHandler(async (req, res) => {
 
   await Message.create({ sessionId: session._id, role: 'user', content: message });
 
-  const queryEmbedding = await embedText(message);
-  const retrievedChunks = await searchChunks({
-    queryEmbedding,
-    orgId: req.org.id,
-    scope: session.scope,
-    projectId: session.projectId,
-    ownerId: req.user.id,
-    topK: 8,
-  });
-
-  Sentry.logger.info('Chat message received', {
-    sessionId: String(session._id),
-    retrievedChunkCount: retrievedChunks.length,
-  });
+  Sentry.logger.info('Chat message received', { sessionId: String(session._id) });
 
   const priorMessages = await Message.find({ sessionId: session._id }).sort({ createdAt: 1 });
   const history = priorMessages.map((m) => ({ role: m.role, content: m.content }));
@@ -109,13 +94,16 @@ const sendMessage = asyncHandler(async (req, res) => {
   const sendEvent = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
   try {
-    const fullText = await streamAnswer({
+    const { text: fullText, sources } = await streamAnswer({
       history,
-      retrievedChunks,
+      orgId: req.org.id,
+      scope: session.scope,
+      projectId: session.projectId,
+      ownerId: req.user.id,
       onToken: (delta) => sendEvent('token', { delta }),
     });
 
-    const citedChunkIds = retrievedChunks.map((c) => c._id);
+    const citedChunkIds = sources.map((s) => s.id);
     await Message.create({ sessionId: session._id, role: 'assistant', content: fullText, citedChunkIds });
 
     Sentry.logger.info('Chat reply streamed', { sessionId: String(session._id), replyLength: fullText.length });
@@ -134,10 +122,7 @@ const sendMessage = asyncHandler(async (req, res) => {
       }
     }
 
-    sendEvent('done', {
-      title,
-      sources: retrievedChunks.map((c) => ({ id: c._id, filename: c.metadata?.filename, score: c.score })),
-    });
+    sendEvent('done', { title, sources });
   } catch (err) {
     sendEvent('error', { message: err.message });
     Sentry.captureException(err, {

@@ -66,7 +66,14 @@ function parseChunkArray(rawText) {
   return null;
 }
 
-async function chunkWithHaiku(handlerOutput, filename) {
+/**
+ * Breaks a document into candidate pieces for the ingestion decision step
+ * (memory/ingest.service.js) to evaluate one at a time — this only splits,
+ * it doesn't decide what's worth keeping (that's shared with WhatsApp
+ * ingestion, which doesn't need splitting since a message already is one
+ * candidate piece).
+ */
+async function splitFileIntoChunks(handlerOutput, filename) {
   const response = await anthropic.messages.create({
     model: env.anthropicChunkModel,
     max_tokens: 8192,
@@ -89,4 +96,4 @@ async function chunkWithHaiku(handlerOutput, filename) {
   return fallbackChunks(handlerOutput);
 }
 
-module.exports = { chunkWithHaiku };
+module.exports = { splitFileIntoChunks };

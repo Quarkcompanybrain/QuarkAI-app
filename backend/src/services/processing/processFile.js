@@ -2,14 +2,18 @@ const Sentry = require('@sentry/node');
 const File = require('../../models/File');
 const { getObjectBuffer } = require('../storage/s3.service');
 const { resolveHandler } = require('../file_handlers/registry');
-const { chunkWithHaiku } = require('../chunking/haiku.service');
-const { embedTexts } = require('../embeddings/openai.service');
-const { insertChunks } = require('../vectorstore/atlas.service');
+const { splitFileIntoChunks } = require('../memory/split.service');
+const { decideAndStore } = require('../memory/ingest.service');
 
 /**
  * Fire-and-forget async processing, tracked entirely through File.status
  * (pending -> in_progress -> done|failed). No queue infra at this scale;
  * add one (BullMQ + Redis) only if upload volume later requires it.
+ *
+ * Splitting and the save/edit decision are separate steps: splitting just
+ * breaks the document into candidate pieces, then each one goes through the
+ * same decideAndStore used for WhatsApp messages, so a re-uploaded/updated
+ * document can correct existing memory instead of just duplicating it.
  */
 async function processFile(fileId) {
   const file = await File.findById(fileId);
@@ -23,22 +27,29 @@ async function processFile(fileId) {
     const handler = resolveHandler(file.mimeType);
     const handlerOutput = await handler.extract({ buffer, mimeType: file.mimeType });
 
-    const chunkTexts = await chunkWithHaiku(handlerOutput, file.filename);
-    if (chunkTexts.length === 0) throw new Error('No extractable content found in this file.');
+    const candidateChunks = await splitFileIntoChunks(handlerOutput, file.filename);
+    if (candidateChunks.length === 0) throw new Error('No extractable content found in this file.');
 
-    const embeddings = await embedTexts(chunkTexts);
+    let savedCount = 0;
+    let editedCount = 0;
 
-    const chunkDocs = chunkTexts.map((text, index) => ({
-      fileId: file._id,
-      orgId: file.orgId,
-      projectId: file.projectId,
-      ownerId: file.ownerId,
-      text,
-      embedding: embeddings[index],
-      metadata: { filename: file.filename, chunkIndex: index },
-    }));
+    for (const [index, text] of candidateChunks.entries()) {
+      const outcome = await decideAndStore({
+        orgId: file.orgId,
+        projectId: file.projectId,
+        ownerId: file.ownerId,
+        sourceType: 'file',
+        fileId: file._id,
+        text,
+        metadata: { filename: file.filename, chunkIndex: index },
+      });
+      if (outcome.action === 'saved') savedCount++;
+      if (outcome.action === 'edited') editedCount++;
+    }
 
-    await insertChunks(chunkDocs);
+    if (savedCount === 0 && editedCount === 0) {
+      throw new Error('No extractable content found in this file.');
+    }
 
     file.status = 'done';
     await file.save();
@@ -46,7 +57,9 @@ async function processFile(fileId) {
     Sentry.logger.info('File processed', {
       fileId: String(file._id),
       filename: file.filename,
-      chunkCount: chunkDocs.length,
+      candidateCount: candidateChunks.length,
+      savedCount,
+      editedCount,
     });
   } catch (err) {
     file.status = 'failed';

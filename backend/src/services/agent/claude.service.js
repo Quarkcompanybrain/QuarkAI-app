@@ -1,38 +1,72 @@
 const { anthropic } = require('../../config/anthropic');
 const env = require('../../config/env');
+const { embedText } = require('../embeddings/openai.service');
+const { searchChunks } = require('../vectorstore/atlas.service');
 
-function buildSystemPrompt(retrievedChunks) {
-  if (retrievedChunks.length === 0) {
-    return 'You are Quark AI, a company-knowledge assistant. No relevant context was found for this question — say so plainly instead of guessing.';
-  }
+const SYSTEM_PROMPT = `You are Quark AI, a company-knowledge assistant. You have a get_knowledge tool that searches the user's stored knowledge base. Use it when answering the question genuinely benefits from company-specific facts, decisions, or details that might be stored — not for simple greetings, small talk, or things you can answer directly. You may call it more than once if the first search doesn't cover the question. When you use retrieved knowledge, answer using it and don't contradict it. If a search turns up nothing relevant, say so plainly instead of guessing.`;
 
-  const context = retrievedChunks
-    .map((c, i) => `[${i + 1}] (from ${c.metadata?.filename || 'a file'})\n${c.text}`)
-    .join('\n\n');
-
-  return `You are Quark AI, a company-knowledge assistant. Answer the user's question using ONLY the context below. Cite sources inline using [1], [2], etc. matching the context blocks. If the context doesn't contain the answer, say so plainly instead of guessing.
-
-Context:
-${context}`;
-}
+const GET_KNOWLEDGE_TOOL = {
+  name: 'get_knowledge',
+  description:
+    "Search the user's stored knowledge base (uploaded documents and WhatsApp-sourced knowledge) for information relevant to a query. Only call this when the question needs company-specific knowledge — skip it for greetings or general questions.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'A natural-language search query describing what information is needed.' },
+    },
+    required: ['query'],
+  },
+};
 
 /**
- * Streams a Claude response. onToken is called with each text delta;
- * resolves with the full accumulated text when done.
+ * Streams a Claude response, letting the model decide via the get_knowledge
+ * tool whether retrieval is needed at all (e.g. "hi" never triggers a vector
+ * search). Runs its own bounded agentic loop so chat.controller.js doesn't
+ * need to know retrieval happened mid-stream — it only sees tokens and a
+ * final `sources` list.
  */
-async function streamAnswer({ history, retrievedChunks, onToken }) {
-  const stream = anthropic.messages.stream({
-    model: env.anthropicChatModel,
-    max_tokens: 2048,
-    system: buildSystemPrompt(retrievedChunks),
-    messages: history,
-  });
+async function streamAnswer({ history, orgId, scope, projectId, ownerId, onToken }) {
+  const messages = [...history];
+  const collectedSources = [];
 
-  stream.on('text', (delta) => onToken(delta));
+  for (let i = 0; i < 4; i++) {
+    const stream = anthropic.messages.stream({
+      model: env.anthropicChatModel,
+      max_tokens: 2048,
+      system: SYSTEM_PROMPT,
+      tools: [GET_KNOWLEDGE_TOOL],
+      messages,
+    });
 
-  const finalMessage = await stream.finalMessage();
-  const textBlock = finalMessage.content.find((block) => block.type === 'text');
-  return textBlock?.text || '';
+    stream.on('text', (delta) => onToken(delta));
+
+    const finalMessage = await stream.finalMessage();
+    messages.push({ role: 'assistant', content: finalMessage.content });
+
+    if (finalMessage.stop_reason !== 'tool_use') {
+      const textBlock = finalMessage.content.find((block) => block.type === 'text');
+      return { text: textBlock?.text || '', sources: collectedSources };
+    }
+
+    const toolResults = [];
+    for (const block of finalMessage.content) {
+      if (block.type !== 'tool_use' || block.name !== 'get_knowledge') continue;
+
+      const queryEmbedding = await embedText(block.input.query);
+      const results = await searchChunks({ queryEmbedding, orgId, scope, projectId, ownerId, topK: 8 });
+
+      for (const r of results) collectedSources.push({ id: r._id, filename: r.metadata?.filename, score: r.score });
+
+      const content = results.length
+        ? results.map((r, idx) => `[${idx + 1}] (from ${r.metadata?.filename || 'a message'})\n${r.text}`).join('\n\n')
+        : 'No relevant knowledge found.';
+
+      toolResults.push({ type: 'tool_result', tool_use_id: block.id, content });
+    }
+    messages.push({ role: 'user', content: toolResults });
+  }
+
+  return { text: '', sources: collectedSources };
 }
 
 /**
@@ -54,22 +88,4 @@ async function generateChatTitle(firstMessage) {
   return title && title.length > 0 ? title.slice(0, 80) : null;
 }
 
-/**
- * Cheap Haiku gate for WhatsApp ingestion: most messages in a group chat are
- * small talk ("ok", "👍", "call you in 5") — this decides whether a given
- * message is worth turning into a permanent memory chunk for a project,
- * before we spend an embedding + storage write on it.
- */
-async function isMessageRelevantToProject({ projectName, message }) {
-  const response = await anthropic.messages.create({
-    model: env.anthropicChunkModel,
-    max_tokens: 5,
-    system: `You decide whether a WhatsApp message is worth permanently remembering as company knowledge for the project "${projectName}". Say YES only if the message contains a real fact, decision, update, instruction, or piece of information someone might later search for. Say NO for greetings, acknowledgements, small talk, emoji-only reactions, or anything without lasting informational value. Respond with ONLY "YES" or "NO".`,
-    messages: [{ role: 'user', content: message }],
-  });
-
-  const textBlock = response.content.find((block) => block.type === 'text');
-  return textBlock?.text?.trim().toUpperCase().startsWith('YES') || false;
-}
-
-module.exports = { streamAnswer, generateChatTitle, isMessageRelevantToProject };
+module.exports = { streamAnswer, generateChatTitle };

@@ -23,7 +23,7 @@ export function ProjectSettings() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6">
-      <div className="mx-auto flex max-w-lg flex-col gap-6">
+      <div className="flex max-w-3xl flex-col gap-5">
         <ProjectDetailsForm projectId={projectId} project={project} onRenamed={refreshProject} />
         <MembersSection projectId={projectId} />
         <WhatsAppSourcesSection projectId={projectId} />
@@ -208,6 +208,7 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
   const [sources, setSources] = useState<ProjectSource[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
   const refreshSources = () => projectsApi.listSources(projectId).then((r) => setSources(r.sources));
 
@@ -231,9 +232,16 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   const MAX_SOURCES = 10;
+  const MAX_VISIBLE_CHATS = 10;
   const sourceKey = (integrationId: string, jid: string) => `${integrationId}:${jid}`;
   const selectedKeys = new Set(sources.map((s) => sourceKey(s.integrationId, s.chatJid)));
   const atLimit = sources.length >= MAX_SOURCES;
+
+  const visibleChats = (chats: WhatsAppChat[]) => {
+    const query = search.trim().toLowerCase();
+    const matches = query ? chats.filter((c) => (c.name || c.jid).toLowerCase().includes(query)) : chats;
+    return matches.slice(0, MAX_VISIBLE_CHATS);
+  };
 
   const handleToggle = async (integrationId: string, chat: WhatsAppChat) => {
     setError(null);
@@ -278,16 +286,28 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
         </p>
       ) : (
         <div className="flex flex-col gap-4">
-          {connectedIntegrations.map((integration) => (
+          <input
+            type="text"
+            placeholder="Search chats and groups…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-sm text-ink shadow-xs outline-none transition-all duration-200 ease-smooth placeholder:text-neutral-400 hover:border-neutral-300 focus:border-magenta-500 focus:shadow-[0_0_0_3px_rgba(255,27,205,0.10)]"
+          />
+          {connectedIntegrations.map((integration) => {
+            const allChats = chatsByIntegration[integration.id] || [];
+            const shown = visibleChats(allChats);
+            return (
             <div key={integration.id}>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
                 {integration.phoneNumber || 'WhatsApp'}
               </p>
-              {(chatsByIntegration[integration.id] || []).length === 0 ? (
+              {allChats.length === 0 ? (
                 <p className="text-sm text-neutral-500">No chats found on this account yet.</p>
+              ) : shown.length === 0 ? (
+                <p className="text-sm text-neutral-500">No chats match "{search}".</p>
               ) : (
                 <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
-                  {(chatsByIntegration[integration.id] || []).map((chat) => {
+                  {shown.map((chat) => {
                     const checked = selectedKeys.has(sourceKey(integration.id, chat.jid));
                     const disabled = !checked && atLimit;
                     return (
@@ -301,7 +321,7 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
                           aria-checked={checked}
                           disabled={disabled}
                           onClick={() => handleToggle(integration.id, chat)}
-                          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:ring-1 focus-visible:ring-magenta-300 focus-visible:ring-offset-1 ${
                             checked ? 'bg-magenta-500' : 'bg-neutral-200'
                           } ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
                         >
@@ -317,7 +337,8 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
                 </ul>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </Card>

@@ -18,7 +18,11 @@ const listIntegrations = asyncHandler(async (req, res) => {
   });
 });
 
+// One WhatsApp account per user — disconnect first to switch numbers.
 const connectWhatsapp = asyncHandler(async (req, res) => {
+  const existing = await Integration.findOne({ userId: req.user.id, type: 'whatsapp' });
+  if (existing) throw new ApiError(409, 'You already have a WhatsApp account connected. Disconnect it first to connect another.');
+
   const integration = await Integration.create({ userId: req.user.id, type: 'whatsapp', status: 'pending' });
 
   connectIntegration(integration._id).catch((err) => {

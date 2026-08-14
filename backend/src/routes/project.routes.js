@@ -20,5 +20,6 @@ router.delete('/:projectId/members/:userId', requireProjectMember, ctrl.removePr
 router.get('/:projectId/sources', requireProjectMember, sourceCtrl.listSources);
 router.post('/:projectId/sources', requireProjectMember, sourceCtrl.addSource);
 router.delete('/:projectId/sources/:sourceId', requireProjectMember, sourceCtrl.removeSource);
+router.get('/:projectId/whatsapp-memory', requireProjectMember, sourceCtrl.listWhatsAppMemory);
 
 module.exports = router;

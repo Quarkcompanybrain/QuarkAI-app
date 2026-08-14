@@ -2,6 +2,7 @@ const Sentry = require('@sentry/node');
 const ProjectSource = require('../models/ProjectSource');
 const Integration = require('../models/Integration');
 const WhatsAppChat = require('../models/WhatsAppChat');
+const Chunk = require('../models/Chunk');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
@@ -66,4 +67,24 @@ const removeSource = asyncHandler(async (req, res) => {
   res.json({ message: 'Removed.' });
 });
 
-module.exports = { listSources, addSource, removeSource };
+// Actual ingested WhatsApp knowledge for the project's Memory tab — distinct
+// from listSources (which chats/groups are picked), this is what got saved
+// from them.
+const listWhatsAppMemory = asyncHandler(async (req, res) => {
+  const chunks = await Chunk.find({ projectId: req.projectId, sourceType: 'whatsapp' })
+    .sort({ createdAt: -1 })
+    .limit(100);
+
+  res.json({
+    chunks: chunks.map((c) => ({
+      id: c._id,
+      text: c.text,
+      chatName: c.metadata?.chatName || null,
+      chatJid: c.metadata?.chatJid || null,
+      sender: c.metadata?.sender || null,
+      messageTimestamp: c.metadata?.messageTimestamp || null,
+    })),
+  });
+});
+
+module.exports = { listSources, addSource, removeSource, listWhatsAppMemory };

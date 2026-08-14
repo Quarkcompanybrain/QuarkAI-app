@@ -46,9 +46,8 @@ export function ChatsHistory() {
   };
 
   const handleNewChat = async () => {
-    if (filter === 'all') return;
-    const scope: ChatScope = filter === 'personal' ? 'personal' : 'project';
-    const projectId = filter === 'personal' ? undefined : filter;
+    const scope: ChatScope = filter === 'personal' || filter === 'all' ? 'personal' : 'project';
+    const projectId = scope === 'personal' ? undefined : filter;
     const res = await chatApi.createSession(scope, projectId);
     const path = scope === 'personal' ? '/personal/chat' : `/projects/${projectId}/chat`;
     navigate(`${path}?session=${res.session.id}`);
@@ -61,12 +60,7 @@ export function ChatsHistory() {
           <h1 className="font-display text-2xl font-semibold text-ink">Chats</h1>
           <p className="text-sm text-neutral-500">Every conversation across personal and project spaces.</p>
         </div>
-        <Button
-          onClick={handleNewChat}
-          disabled={filter === 'all'}
-          title={filter === 'all' ? 'Pick Personal or a project first' : undefined}
-          className="gap-1.5"
-        >
+        <Button onClick={handleNewChat} className="gap-1.5">
           <PlusIcon className="h-3.5 w-3.5" />
           New chat
         </Button>

@@ -4,7 +4,7 @@ import { integrationsApi, streamIntegrationStatus } from '../features/integratio
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { PulseNode } from '../components/PulseNode';
-import { AlertTriangleIcon, InfoIcon, MailIcon, MessageCircleIcon, PlugIcon } from '../components/icons';
+import { InfoIcon, MailIcon, MessageCircleIcon, PlugIcon } from '../components/icons';
 import type { Integration } from '../types';
 
 function InfoTooltip({ children }: { children: string }) {
@@ -31,11 +31,11 @@ function InfoTooltip({ children }: { children: string }) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
             transition={{ duration: 0.12 }}
-            className="absolute left-1/2 top-full z-10 mt-2 w-64 -translate-x-1/2 rounded-xl border border-magenta-100 bg-white p-3 shadow-lg"
+            className="absolute left-1/2 top-full z-10 mt-2 w-64 -translate-x-1/2 rounded-xl border border-neutral-150 bg-white p-3 shadow-lg"
           >
             <div className="flex items-start gap-2">
-              <AlertTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-magenta-600" />
-              <p className="text-xs leading-relaxed text-magenta-700">{children}</p>
+              <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-400" />
+              <p className="text-xs leading-relaxed text-neutral-500">{children}</p>
             </div>
           </motion.div>
         )}
@@ -86,11 +86,11 @@ export function Integrations() {
   };
 
   return (
-    <div className="mx-auto h-full max-w-2xl overflow-y-auto p-8">
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6">
       <h1 className="font-display text-2xl font-semibold text-ink">Integrations</h1>
       <p className="mt-1 text-sm text-neutral-500">Connect external sources so Quark AI can learn from them.</p>
 
-      <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2">
+      <div className="mt-6 grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -100,10 +100,10 @@ export function Integrations() {
               <div className="flex items-center gap-1.5">
                 <h2 className="font-display text-base font-semibold text-ink">WhatsApp</h2>
                 <InfoTooltip>
-                  WhatsApp integration uses an unofficial connection method (not the official WhatsApp Business API).
-                  This is against WhatsApp's Terms of Service and carries a real risk of the connected number being
-                  flagged, rate limited, or banned — this has happened to real accounts. We recommend connecting a
-                  spare/secondary number rather than your primary line.
+                  This connects using Baileys, an open-source WhatsApp Web library — not WhatsApp's official
+                  Business API. It's widely used and generally reliable, but as with any unofficial client there's
+                  a small chance of the number being rate limited. If you'd rather play it safe, connecting a
+                  secondary number works just as well.
                 </InfoTooltip>
               </div>
             </div>
@@ -111,10 +111,12 @@ export function Integrations() {
 
           <p className="mt-3 text-sm text-neutral-500">Learn from your groups and chats in real time.</p>
 
-          <Button onClick={handleConnect} loading={connecting} className="mt-4 w-full gap-1.5">
-            <PlugIcon className="h-3.5 w-3.5" />
-            Connect account
-          </Button>
+          {integrations.length === 0 && (
+            <Button onClick={handleConnect} loading={connecting} className="mt-4 w-full gap-1.5">
+              <PlugIcon className="h-3.5 w-3.5" />
+              Connect account
+            </Button>
+          )}
 
           {connectError && <p className="mt-3 text-sm text-magenta-600">{connectError}</p>}
 

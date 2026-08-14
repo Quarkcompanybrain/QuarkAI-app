@@ -8,6 +8,15 @@ export interface ProjectMember {
   joinedAt: string;
 }
 
+export interface WhatsAppMemoryChunk {
+  id: string;
+  text: string;
+  chatName: string | null;
+  chatJid: string | null;
+  sender: string | null;
+  messageTimestamp: string | null;
+}
+
 export const projectsApi = {
   list: () => api.get<{ projects: Project[] }>('/projects'),
 
@@ -36,4 +45,7 @@ export const projectsApi = {
 
   removeSource: (projectId: string, sourceId: string) =>
     api.delete<{ message: string }>(`/projects/${projectId}/sources/${sourceId}`),
+
+  listWhatsAppMemory: (projectId: string) =>
+    api.get<{ chunks: WhatsAppMemoryChunk[] }>(`/projects/${projectId}/whatsapp-memory`),
 };

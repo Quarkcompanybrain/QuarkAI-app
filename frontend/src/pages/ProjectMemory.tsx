@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { FilesPanel } from '../features/files/FilesPanel';
-import { projectsApi } from '../features/projects/api';
+import { projectsApi, type WhatsAppMemoryChunk } from '../features/projects/api';
+import { PulseNode } from '../components/PulseNode';
+import { EmptyState } from '../components/EmptyState';
 import { ChatBubbleIcon } from '../components/icons';
-import type { ProjectSource } from '../types';
 
 export function ProjectMemory() {
   const { projectId = '' } = useParams();
-  const [sources, setSources] = useState<ProjectSource[]>([]);
+  const [chunks, setChunks] = useState<WhatsAppMemoryChunk[] | null>(null);
 
   useEffect(() => {
-    projectsApi.listSources(projectId).then((r) => setSources(r.sources));
+    setChunks(null);
+    projectsApi.listWhatsAppMemory(projectId).then((r) => setChunks(r.chunks));
   }, [projectId]);
 
   return (
@@ -19,34 +21,35 @@ export function ProjectMemory() {
         <FilesPanel projectId={projectId} />
 
         <section>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-display text-lg font-semibold text-ink">WhatsApp sources</h2>
-            <Link
-              to={`/projects/${projectId}/settings`}
-              className="text-xs font-medium text-magenta-600 hover:text-magenta-700"
-            >
-              Manage in Settings
-            </Link>
-          </div>
+          <h2 className="mb-4 font-display text-lg font-semibold text-ink">WhatsApp knowledge</h2>
 
-          {sources.length === 0 ? (
-            <p className="text-sm text-neutral-500">
-              No chats connected yet. Add some from{' '}
-              <Link to={`/projects/${projectId}/settings`} className="font-medium text-magenta-600 hover:underline">
-                Settings
-              </Link>{' '}
-              to start pulling relevant messages into this project's memory.
+          {chunks === null ? (
+            <p className="flex items-center gap-2 text-sm text-neutral-500">
+              <PulseNode size={6} /> Loading…
             </p>
+          ) : chunks.length === 0 ? (
+            <EmptyState
+              icon={<ChatBubbleIcon className="h-5 w-5 text-magenta-500" />}
+              title="No WhatsApp knowledge yet"
+              description="Once a connected chat sends something worth remembering, it'll show up here."
+            />
           ) : (
             <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150 shadow-xs">
-              {sources.map((s) => (
-                <li key={s.id} className="flex items-center gap-3 px-4 py-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-150 bg-neutral-50 text-neutral-400">
+              {chunks.map((c) => (
+                <li key={c.id} className="flex items-start gap-3 px-4 py-3">
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-150 bg-neutral-50 text-neutral-400">
                     <ChatBubbleIcon className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink">{s.chatName || s.chatJid}</p>
-                    <p className="text-xs text-neutral-500">{s.isGroup ? 'Group' : 'Individual chat'}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-xs font-medium text-neutral-500">{c.chatName || c.chatJid || 'WhatsApp'}</p>
+                      {c.messageTimestamp && (
+                        <p className="shrink-0 text-xs text-neutral-400">
+                          {new Date(c.messageTimestamp).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    <p className="mt-1 text-sm text-ink">{c.text}</p>
                   </div>
                 </li>
               ))}

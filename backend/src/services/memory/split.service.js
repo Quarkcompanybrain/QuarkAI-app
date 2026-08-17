@@ -1,5 +1,6 @@
 const { anthropic } = require('../../config/anthropic');
 const env = require('../../config/env');
+const { ingestionDebug } = require('../../utils/ingestionDebug');
 
 const SYSTEM_PROMPT = `You read a document and split it into semantically coherent chunks for a retrieval system.
 Rules:
@@ -74,7 +75,7 @@ function parseChunkArray(rawText) {
  * candidate piece).
  */
 async function splitFileIntoChunks(handlerOutput, filename) {
-  console.info('[file][split] AI input', {
+  ingestionDebug('info', 'file split AI input', {
     filename,
     kind: handlerOutput.kind,
     mediaType: handlerOutput.mediaType || null,
@@ -87,7 +88,7 @@ async function splitFileIntoChunks(handlerOutput, filename) {
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: buildContentBlocks(handlerOutput, filename) }],
   });
-  console.info('[file][split] AI output', { filename, stopReason: response.stop_reason, content: response.content });
+  ingestionDebug('info', 'file split AI output', { filename, stopReason: response.stop_reason, content: response.content });
   const textBlock = response.content.find((block) => block.type === 'text');
   if (!textBlock) return fallbackChunks(handlerOutput);
 

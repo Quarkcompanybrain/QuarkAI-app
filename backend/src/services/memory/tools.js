@@ -89,8 +89,11 @@ async function executeIngestTool(name, input, ctx) {
 
   if (name === 'edit_memory') {
     const embedding = await embedText(input.text);
+    const scopeFilter = ctx.projectId
+      ? { projectId: ctx.projectId }
+      : { projectId: null, ownerId: ctx.ownerId };
     const updated = await Chunk.findOneAndUpdate(
-      { _id: input.chunkId, orgId: ctx.orgId },
+      { _id: input.chunkId, orgId: ctx.orgId, deletedAt: null, ...scopeFilter },
       { text: input.text, embedding }
     );
     if (!updated) return { message: 'That memory entry no longer exists.' };

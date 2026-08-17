@@ -5,6 +5,7 @@ const { getObjectBuffer } = require('../storage/s3.service');
 const { resolveHandler } = require('../file_handlers/registry');
 const { splitFileIntoChunks } = require('../memory/split.service');
 const { decideAndStore } = require('../memory/ingest.service');
+const { ingestionDebug } = require('../../utils/ingestionDebug');
 
 /**
  * Fire-and-forget async processing, tracked entirely through File.status
@@ -23,7 +24,7 @@ async function processFile(fileId) {
   try {
     file.status = 'in_progress';
     await file.save();
-    console.info('[file][processing] started', { fileId: String(file._id), filename: file.filename, mimeType: file.mimeType, sourceType: file.sourceType });
+    ingestionDebug('info', 'file processing started', { fileId: String(file._id), filename: file.filename, mimeType: file.mimeType, sourceType: file.sourceType });
 
     const buffer = await getObjectBuffer(file.s3Key);
     const handler = resolveHandler(file.mimeType);
@@ -71,13 +72,13 @@ async function processFile(fileId) {
       savedCount,
       editedCount,
     });
-    console.info('[file][processing] completed', { fileId: String(file._id), candidateCount: candidateChunks.length, savedCount, editedCount });
+    ingestionDebug('info', 'file processing completed', { fileId: String(file._id), candidateCount: candidateChunks.length, savedCount, editedCount });
     return { chunkIds, savedCount, editedCount };
   } catch (err) {
     file.status = 'failed';
     file.failureReason = err.message?.slice(0, 500) || 'Unknown processing error';
     await file.save();
-    console.warn('[file][processing] failed', {
+    ingestionDebug('warn', 'file processing failed', {
       fileId: String(file._id),
       filename: file.filename,
       mimeType: file.mimeType,

@@ -37,4 +37,5 @@ module.exports = {
   sentryDsn: process.env.SENTRY_DSN,
 
   integrationEncryptionKey: process.env.INTEGRATION_ENCRYPTION_KEY,
+  ingestionDebugLogs: process.env.INGESTION_DEBUG_LOGS === 'true',
 };

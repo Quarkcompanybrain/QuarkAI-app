@@ -12,6 +12,7 @@ const { processFile } = require('../processing/processFile');
 const { SUPPORTED_MIME_TYPES } = require('../file_handlers/registry');
 const { encrypt } = require('../../utils/crypto');
 const { normalizeMessageContent } = require('baileys');
+const { ingestionDebug } = require('../../utils/ingestionDebug');
 
 const MAX_UNSPLIT_MESSAGE_LENGTH = 2000;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -134,7 +135,7 @@ async function ingestAttachmentForProject({ buffer, attachment, messageRecord, s
       messageTimestamp: messageRecord.sentAt,
     },
   });
-  console.info('[whatsapp][attachment] stored', { messageId: messageRecord.messageId, fileId: String(file._id), filename, mimeType: attachment.mimeType, sizeBytes: buffer.length });
+  ingestionDebug('info', 'WhatsApp attachment stored', { messageId: messageRecord.messageId, fileId: String(file._id), filename, mimeType: attachment.mimeType, sizeBytes: buffer.length });
   const result = await processFile(file._id);
   return { fileId: String(file._id), chunkIds: result.chunkIds || [] };
 }
@@ -218,7 +219,7 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
 
   const supportedAttachment = isSupportedAttachment(attachment);
   if (attachment) {
-    console.info('[whatsapp][attachment] detected', {
+    ingestionDebug('info', 'WhatsApp attachment detected', {
       messageId,
       messageType,
       mimeType: attachment.mimeType,
@@ -244,11 +245,11 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
   const getAttachmentBuffer = async () => {
     if (!attachmentBufferPromise) {
       if (!downloadMedia) throw new Error('WhatsApp media downloader is unavailable.');
-      console.info('[whatsapp][attachment] downloading', { messageId, mimeType: attachment.mimeType });
+      ingestionDebug('info', 'WhatsApp attachment downloading', { messageId, mimeType: attachment.mimeType });
       attachmentBufferPromise = Promise.resolve(downloadMedia()).then((buffer) => {
         if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('WhatsApp attachment download returned no data.');
         if (buffer.length > MAX_ATTACHMENT_BYTES) throw new Error('WhatsApp attachment exceeds the 25 MB limit.');
-        console.info('[whatsapp][attachment] downloaded', { messageId, mimeType: attachment.mimeType, sizeBytes: buffer.length });
+        ingestionDebug('info', 'WhatsApp attachment downloaded', { messageId, mimeType: attachment.mimeType, sizeBytes: buffer.length });
         return buffer;
       });
     }

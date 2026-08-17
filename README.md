@@ -40,6 +40,39 @@ cp .env.example .env   # defaults to http://localhost:4000/api, adjust if needed
 npm run dev             # http://localhost:5173
 ```
 
+### Production: SSE behind Nginx
+
+The WhatsApp connection screen uses Server-Sent Events (SSE) to deliver the QR code and connection status. The backend sends an immediate SSE heartbeat and disables Nginx buffering with `X-Accel-Buffering: no`; the EC2 Nginx proxy must also avoid WebSocket-only headers and response buffering.
+
+For `/etc/nginx/sites-available/quark-backend`, use this proxy block inside the HTTPS server:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:4000;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+```
+
+Do not set `Upgrade` or `Connection 'upgrade'` for this SSE proxy. After updating the server configuration, run:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+pm2 restart <backend-app-name> --update-env
+```
+
 ## What's built
 
 - Auth: OTP email signup, login, JWT sessions, multi-org support with an active-org switcher

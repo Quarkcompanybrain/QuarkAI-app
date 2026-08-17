@@ -44,11 +44,17 @@ const streamStatus = asyncHandler(async (req, res) => {
   const integration = await Integration.findOne({ _id: req.params.id, userId: req.user.id });
   if (!integration) throw new ApiError(404, 'Integration not found.');
 
-  res.writeHead(200, {
+  // Flush an SSE comment immediately. Without an initial response body, a
+  // reverse proxy/browser can wait for the first QR event before exposing the
+  // stream, leaving the integration UI stuck on “Generating QR code…”.
+  res.status(200).set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
   });
+  res.flushHeaders();
+  res.write(': connected\n\n');
 
   const sendEvent = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 

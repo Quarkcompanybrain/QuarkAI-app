@@ -19,6 +19,7 @@ Fill in `.env`:
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `S3_BUCKET_NAME` / `AWS_REGION` — for file storage
 - `ANTHROPIC_API_KEY` — powers chat (Sonnet) and file chunking (Haiku)
 - `OPENAI_API_KEY` — powers embeddings
+- `INTEGRATION_ENCRYPTION_KEY` — 64-char hex string (32 bytes), encrypts stored integration credentials (e.g. WhatsApp session data) at rest. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
 
 ```bash
 npm run dev   # http://localhost:4000
@@ -47,6 +48,9 @@ npm run dev             # http://localhost:5173
 - Files: upload to S3, per-format handler registry (PDF/image native via Claude, docx/pptx/xlsx converted to text), Haiku chunking, OpenAI embeddings, Atlas Vector Search storage
 - Chat: personal or project-scoped RAG retrieval, Claude Sonnet responses streamed via SSE
 - Three-tier data isolation (org → project/personal) enforced in shared middleware, soft delete everywhere
+- Integrations: WhatsApp (via Baileys — unofficial, see warning below), connected per-user, session credentials encrypted at rest. Every live received message and sent message is retained as an encrypted source record; a project's Settings tab picks which chats/groups feed that project, and each selected project gets its own relevance decision and memory-chunk links. Short messages are stored as one semantic candidate; long messages are split before embedding. Sockets reconnect automatically on server restart using stored creds — no re-scanning the QR code. Auth-key counts and encrypted size are tracked per connection, but active Signal keys are never auto-pruned.
+
+  **⚠️ WhatsApp risk**: Baileys automates WhatsApp Web, which is against WhatsApp's Terms of Service and carries a real risk of the connected number being flagged or banned. The Integrations page shows this warning to users; consider using a spare/secondary number rather than a primary line, in dev and in production.
 
 ## Verified so far
 
@@ -54,3 +58,5 @@ npm run dev             # http://localhost:5173
 - Frontend: `tsc --noEmit` and `vite build` both pass clean; Login/Signup/protected-route redirect confirmed visually in-browser
 
 Once your `.env` is filled in, walking through signup → create org → invite a teammate → create a project → upload a file → chat is the natural first end-to-end test.
+
+**WhatsApp integration specifically**: verified end-to-end up through a real Baileys connection generating a real, scannable QR code over the SSE stream, plus disconnect/cleanup. The message-ingestion path (relevance check → embed → store, once a phone actually completes pairing) hasn't been exercised with a live connection — it reuses the same embedding/storage functions the file pipeline already proved out, but it's worth a real scan-and-message test before relying on it.

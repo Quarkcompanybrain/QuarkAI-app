@@ -153,3 +153,4 @@ quark-ai/
 - RBAC beyond admin/member (granular permissions, custom roles)
 - Error monitoring (Sentry or similar)
 - Dedicated job queue (BullMQ + Redis) if async file-processing volume grows beyond simple fire-and-forget
+- WhatsApp lifecycle reconciliation: message edits, revocations/deletions, reactions, and group metadata/participant updates; propagate relevant changes from source-message records into memory

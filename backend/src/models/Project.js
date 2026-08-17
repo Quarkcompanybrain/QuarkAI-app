@@ -4,6 +4,7 @@ const { softDeletePlugin } = require('../utils/softDeletePlugin');
 const projectSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
+    description: { type: String, trim: true, default: '', maxlength: 2000 },
     orgId: { type: Schema.Types.ObjectId, ref: 'Org', required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },

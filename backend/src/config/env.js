@@ -35,4 +35,6 @@ module.exports = {
   openaiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
 
   sentryDsn: process.env.SENTRY_DSN,
+
+  integrationEncryptionKey: process.env.INTEGRATION_ENCRYPTION_KEY,
 };

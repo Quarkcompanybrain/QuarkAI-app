@@ -21,7 +21,7 @@ export function ProjectLayout() {
       <TabNav
         tabs={[
           { to: `/projects/${projectId}/chat`, label: 'Chat' },
-          { to: `/projects/${projectId}/files`, label: 'Files' },
+          { to: `/projects/${projectId}/memory`, label: 'Memory' },
           { to: `/projects/${projectId}/settings`, label: 'Settings' },
         ]}
       />

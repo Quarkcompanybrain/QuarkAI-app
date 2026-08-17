@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { chatApi, streamChatMessage } from './api';
 import type { ChatMessage, ChatScope } from '../../types';
@@ -12,6 +12,41 @@ interface DisplayMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g);
+  return parts.filter(Boolean).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={index} className="rounded bg-neutral-100 px-1 py-0.5 font-mono text-[0.85em]">{part.slice(1, -1)}</code>;
+    }
+    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+    if (link) {
+      return <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="text-magenta-600 underline underline-offset-2">{link[1]}</a>;
+    }
+    return part;
+  });
+}
+
+/** Safe, deliberately small Markdown renderer for assistant responses. */
+function FormattedChatContent({ content }: { content: string }) {
+  const lines = content.split('\n');
+  return (
+    <div className="space-y-2">
+      {lines.map((line, index) => {
+        const heading = line.match(/^(#{1,3})\s+(.+)$/);
+        const bullet = line.match(/^[-*]\s+(.+)$/);
+        const ordered = line.match(/^\d+[.)]\s+(.+)$/);
+        if (!line.trim()) return <div key={index} className="h-1" />;
+        if (heading) return <p key={index} className="font-semibold text-ink">{renderInlineMarkdown(heading[2])}</p>;
+        if (bullet || ordered) {
+          return <div key={index} className="flex gap-2"><span className="text-neutral-400">{ordered ? '•' : '–'}</span><span>{renderInlineMarkdown((bullet || ordered)![1])}</span></div>;
+        }
+        return <p key={index}>{renderInlineMarkdown(line)}</p>;
+      })}
+    </div>
+  );
 }
 
 export function ChatPanel({
@@ -172,7 +207,11 @@ export function ChatPanel({
                       : 'border border-neutral-150 bg-white text-ink shadow-xs'
                   }`}
                 >
-                  {m.content || (streaming && <PulseNode size={6} />)}
+                  {m.content ? (
+                    m.role === 'assistant' ? <FormattedChatContent content={m.content} /> : m.content
+                  ) : (
+                    streaming && <PulseNode size={6} />
+                  )}
                   {m.role === 'assistant' && streaming && m.content && (
                     <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-blink bg-magenta-500" />
                   )}

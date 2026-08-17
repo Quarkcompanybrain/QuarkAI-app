@@ -19,10 +19,12 @@ const HANDLERS_BY_MIME = {
   'text/plain': textHandler,
   'text/markdown': textHandler,
   'text/csv': textHandler,
+  'application/csv': textHandler,
 
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': docxHandler,
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': pptxHandler,
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': xlsxHandler,
+  'application/vnd.ms-excel': xlsxHandler,
 };
 
 const SUPPORTED_MIME_TYPES = Object.keys(HANDLERS_BY_MIME);

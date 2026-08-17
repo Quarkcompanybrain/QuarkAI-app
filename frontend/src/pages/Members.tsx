@@ -48,11 +48,11 @@ export function Members() {
   };
 
   return (
-    <div className="mx-auto h-full max-w-2xl overflow-y-auto p-8">
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6">
       <h1 className="font-display text-2xl font-semibold text-ink">Members</h1>
       <p className="mt-1 text-sm text-neutral-500">People with access to this organization.</p>
 
-      <div className="mt-8 flex flex-col gap-6">
+      <div className="mt-6 flex max-w-3xl flex-col gap-5">
         {isAdmin && (
           <Card>
             <h2 className="mb-4 font-display text-lg font-semibold text-ink">Invite by email</h2>

@@ -3,15 +3,26 @@ const { softDeletePlugin } = require('../utils/softDeletePlugin');
 
 const chunkSchema = new Schema(
   {
-    fileId: { type: Schema.Types.ObjectId, ref: 'File', required: true },
+    sourceType: { type: String, enum: ['file', 'whatsapp'], default: 'file' },
+    fileId: { type: Schema.Types.ObjectId, ref: 'File', default: null }, // set when sourceType === 'file'
     orgId: { type: Schema.Types.ObjectId, ref: 'Org', required: true },
-    projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null }, // null => personal
+    projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null }, // null => personal (file sources only)
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     text: { type: String, required: true },
     embedding: { type: [Number], required: true }, // indexed by an Atlas Vector Search index (see docs/atlas-vector-index.json)
     metadata: {
       filename: String,
       chunkIndex: Number,
+      // whatsapp sourceType only:
+      integrationId: { type: Schema.Types.ObjectId, ref: 'Integration' },
+      chatJid: String,
+      chatName: String,
+      sender: String,
+      senderName: String,
+      fromMe: Boolean,
+      sourceMessageId: { type: Schema.Types.ObjectId, ref: 'WhatsAppMessage' },
+      whatsappMessageId: String,
+      messageTimestamp: Date,
     },
   },
   { timestamps: true }

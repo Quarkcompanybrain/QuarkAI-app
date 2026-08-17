@@ -12,7 +12,6 @@ const { useMongoAuthState, clearAuthState } = require('./authState');
 const Integration = require('../../models/Integration');
 const WhatsAppChat = require('../../models/WhatsAppChat');
 const { handleIncomingMessage } = require('./ingest.service');
-const { ingestionDebug } = require('../../utils/ingestionDebug');
 
 const logger = pino({ level: 'silent' });
 
@@ -187,7 +186,6 @@ async function connectIntegration(integrationId) {
   });
 
   sock.ev.on('messages.upsert', ({ messages, type }) => {
-    ingestionDebug('info', 'WhatsApp messages upsert', { integrationId, type, messages: messages.map((m) => ({ id: m.key?.id, fromMe: m.key?.fromMe, jid: m.key?.remoteJid })) });
     for (const msg of messages) {
       // Baileys reports live inbound messages as `notify`. Messages sent from
       // the linked phone can arrive as either `notify` or `append`; accept the

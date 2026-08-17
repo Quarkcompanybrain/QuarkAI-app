@@ -1,7 +1,6 @@
 const { anthropic } = require('../../config/anthropic');
 const env = require('../../config/env');
 const { INGEST_TOOLS, executeIngestTool } = require('./tools');
-const { ingestionDebug } = require('../../utils/ingestionDebug');
 
 const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document or a single chat message. Decide what to do with it:
 
@@ -29,7 +28,6 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
   const messages = [{ role: 'user', content: text }];
   let outcome = { action: 'skipped' };
   for (let i = 0; i < 3; i++) {
-    ingestionDebug('info', 'memory AI input', { attempt: i + 1, sourceType, projectId: String(projectId || ''), fileId: fileId ? String(fileId) : null, text, projectContext, metadata });
     const response = await anthropic.messages.create({
       model: env.anthropicChunkModel,
       max_tokens: 1024,
@@ -37,7 +35,6 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
       tools: INGEST_TOOLS,
       messages,
     });
-    ingestionDebug('info', 'memory AI output', { attempt: i + 1, stopReason: response.stop_reason, content: response.content });
 
     messages.push({ role: 'assistant', content: response.content });
     if (response.stop_reason !== 'tool_use') break;

@@ -17,19 +17,26 @@ Respond only with tool calls, no commentary.`;
  * (search/save/edit), so both sources dedupe and stay up to date against
  * each other identically.
  */
-async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, text, metadata }) {
+function projectContextPrompt(projectContext) {
+  if (!projectContext?.name) return '';
+  const description = projectContext.description?.trim();
+  return `\n\nThis candidate is for the project "${projectContext.name}".${description ? ` Its purpose is: ${description}` : ''} Only save it when it is genuinely relevant to that project; skip unrelated content even if it might be useful elsewhere.`;
+}
+
+async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, text, metadata, projectContext }) {
   const ctx = { orgId, projectId, ownerId, sourceType, fileId, metadata };
   const messages = [{ role: 'user', content: text }];
   let outcome = { action: 'skipped' };
-
   for (let i = 0; i < 3; i++) {
+    console.info('[memory][ingest] AI input', { attempt: i + 1, sourceType, projectId: String(projectId || ''), fileId: fileId ? String(fileId) : null, text, projectContext, metadata });
     const response = await anthropic.messages.create({
       model: env.anthropicChunkModel,
       max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      system: `${SYSTEM_PROMPT}${projectContextPrompt(projectContext)}`,
       tools: INGEST_TOOLS,
       messages,
     });
+    console.info('[memory][ingest] AI output', { attempt: i + 1, stopReason: response.stop_reason, content: response.content });
 
     messages.push({ role: 'assistant', content: response.content });
     if (response.stop_reason !== 'tool_use') break;

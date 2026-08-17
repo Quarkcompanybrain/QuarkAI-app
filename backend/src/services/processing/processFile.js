@@ -1,5 +1,6 @@
 const Sentry = require('@sentry/node');
 const File = require('../../models/File');
+const Project = require('../../models/Project');
 const { getObjectBuffer } = require('../storage/s3.service');
 const { resolveHandler } = require('../file_handlers/registry');
 const { splitFileIntoChunks } = require('../memory/split.service');
@@ -17,11 +18,12 @@ const { decideAndStore } = require('../memory/ingest.service');
  */
 async function processFile(fileId) {
   const file = await File.findById(fileId);
-  if (!file) return;
+  if (!file) return { chunkIds: [] };
 
   try {
     file.status = 'in_progress';
     await file.save();
+    console.info('[file][processing] started', { fileId: String(file._id), filename: file.filename, mimeType: file.mimeType, sourceType: file.sourceType });
 
     const buffer = await getObjectBuffer(file.s3Key);
     const handler = resolveHandler(file.mimeType);
@@ -32,26 +34,34 @@ async function processFile(fileId) {
 
     let savedCount = 0;
     let editedCount = 0;
+    const chunkIds = [];
+    const project = file.projectId ? await Project.findById(file.projectId).select('name description').lean() : null;
 
     for (const [index, text] of candidateChunks.entries()) {
       const outcome = await decideAndStore({
         orgId: file.orgId,
         projectId: file.projectId,
         ownerId: file.ownerId,
-        sourceType: 'file',
+        sourceType: file.sourceType === 'whatsapp' ? 'whatsapp' : 'file',
         fileId: file._id,
         text,
-        metadata: { filename: file.filename, chunkIndex: index },
+        metadata: {
+          filename: file.filename,
+          chunkIndex: index,
+          ...(file.sourceType === 'whatsapp' ? file.whatsapp.toObject?.() || file.whatsapp : {}),
+        },
+        projectContext: project ? { name: project.name, description: project.description } : null,
       });
       if (outcome.action === 'saved') savedCount++;
       if (outcome.action === 'edited') editedCount++;
-    }
-
-    if (savedCount === 0 && editedCount === 0) {
-      throw new Error('No extractable content found in this file.');
+      if (outcome.chunkId) chunkIds.push(outcome.chunkId);
     }
 
     file.status = 'done';
+    // A readable file can legitimately yield no durable knowledge (for
+    // example, a decorative image). That is a completed evaluation, not a
+    // processing failure; only extraction/parsing errors should fail the File.
+    file.failureReason = null;
     await file.save();
 
     Sentry.logger.info('File processed', {
@@ -61,15 +71,24 @@ async function processFile(fileId) {
       savedCount,
       editedCount,
     });
+    console.info('[file][processing] completed', { fileId: String(file._id), candidateCount: candidateChunks.length, savedCount, editedCount });
+    return { chunkIds, savedCount, editedCount };
   } catch (err) {
     file.status = 'failed';
     file.failureReason = err.message?.slice(0, 500) || 'Unknown processing error';
     await file.save();
+    console.warn('[file][processing] failed', {
+      fileId: String(file._id),
+      filename: file.filename,
+      mimeType: file.mimeType,
+      reason: file.failureReason,
+    });
 
     Sentry.captureException(err, {
       tags: { pipeline: 'file_processing' },
       extra: { fileId: String(file._id), filename: file.filename, mimeType: file.mimeType },
     });
+    throw err;
   }
 }
 

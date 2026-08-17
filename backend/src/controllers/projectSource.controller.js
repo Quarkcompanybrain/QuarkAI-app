@@ -50,7 +50,7 @@ const addSource = asyncHandler(async (req, res) => {
     sourceType: 'whatsapp',
     integrationId,
     chatJid,
-    chatName: chat.name,
+    chatName: chat.name || chatJid,
     isGroup: chat.isGroup,
     addedBy: req.user.id,
   });

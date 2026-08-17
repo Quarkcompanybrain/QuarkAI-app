@@ -4,7 +4,8 @@ import { integrationsApi, streamIntegrationStatus } from '../features/integratio
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { PulseNode } from '../components/PulseNode';
-import { InfoIcon, MailIcon, MessageCircleIcon, PlugIcon } from '../components/icons';
+import { InfoIcon, MailIcon, PlugIcon } from '../components/icons';
+import { FaWhatsapp } from 'react-icons/fa';
 import type { Integration } from '../types';
 
 function InfoTooltip({ children }: { children: string }) {
@@ -95,7 +96,7 @@ export function Integrations() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-magenta-50 text-magenta-600">
-                <MessageCircleIcon className="h-5 w-5" />
+                <FaWhatsapp className="h-5 w-5" aria-hidden="true" />
               </div>
               <div className="flex items-center gap-1.5">
                 <h2 className="font-display text-base font-semibold text-ink">WhatsApp</h2>

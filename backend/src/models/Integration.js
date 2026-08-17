@@ -13,6 +13,15 @@ const integrationSchema = new Schema(
     credsEncrypted: { type: String, default: null }, // Baileys auth creds JSON, AES-256-GCM encrypted
     lastConnectedAt: { type: Date, default: null },
     lastError: { type: String, default: null },
+    // Auth keys are required Signal-protocol state. This is observability only:
+    // active keys are never automatically pruned, because that could corrupt a
+    // valid WhatsApp session.
+    authKeyStats: {
+      keyCount: { type: Number, default: 0 },
+      encryptedBytes: { type: Number, default: 0 },
+      categories: { type: Map, of: Number, default: () => new Map() },
+      updatedAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

@@ -3,12 +3,12 @@ const env = require('../../config/env');
 const { embedText } = require('../embeddings/openai.service');
 const { searchChunks } = require('../vectorstore/atlas.service');
 
-const SYSTEM_PROMPT = `You are Quark AI, a company-knowledge assistant. You have a get_knowledge tool that searches the user's stored knowledge base. Use it when answering the question genuinely benefits from company-specific facts, decisions, or details that might be stored — not for simple greetings, small talk, or things you can answer directly. You may call it more than once if the first search doesn't cover the question. When you use retrieved knowledge, answer using it and don't contradict it. If a search turns up nothing relevant, say so plainly instead of guessing.`;
+const SYSTEM_PROMPT = `You are Quark AI, a company-knowledge assistant. You have a get_knowledge tool that searches the user's stored knowledge base. Proactively use it for every substantive question unless it is clearly a simple greeting, small talk, or a purely general request with no possible connection to the user's organization, projects, files, decisions, or conversations. When in doubt, search first: the knowledge base may hold helpful context even if the question does not explicitly mention a file or project. You may call it more than once if the first search does not cover the question. When you use retrieved knowledge, ground the answer in it and do not contradict it. If a search turns up nothing relevant, say that no relevant stored knowledge was found, then provide a clearly-labelled general answer only when useful.`;
 
 const GET_KNOWLEDGE_TOOL = {
   name: 'get_knowledge',
   description:
-    "Search the user's stored knowledge base (uploaded documents and WhatsApp-sourced knowledge) for information relevant to a query. Only call this when the question needs company-specific knowledge — skip it for greetings or general questions.",
+    "Search the user's stored knowledge base (uploaded documents and WhatsApp-sourced knowledge) for information relevant to a query. Use this proactively for substantive questions when stored context could help; skip only simple greetings, small talk, and clearly unrelated general questions.",
   input_schema: {
     type: 'object',
     properties: {

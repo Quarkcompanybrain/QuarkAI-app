@@ -1,7 +1,53 @@
 const { initAuthCreds, BufferJSON, proto } = require('baileys');
+const Sentry = require('@sentry/node');
 const Integration = require('../../models/Integration');
 const WhatsAppAuthKey = require('../../models/WhatsAppAuthKey');
 const { encrypt, decrypt } = require('../../utils/crypto');
+
+const AUTH_KEY_STATS_REFRESH_MS = 60 * 1000;
+const pendingStatRefreshes = new Map();
+
+async function refreshAuthKeyStats(integrationId) {
+  const grouped = await WhatsAppAuthKey.aggregate([
+    { $match: { integrationId } },
+    {
+      $group: {
+        _id: '$category',
+        keyCount: { $sum: 1 },
+        encryptedBytes: { $sum: { $strLenBytes: '$valueEncrypted' } },
+      },
+    },
+  ]);
+
+  const categories = Object.fromEntries(grouped.map((row) => [row._id, row.keyCount]));
+  const keyCount = grouped.reduce((sum, row) => sum + row.keyCount, 0);
+  const encryptedBytes = grouped.reduce((sum, row) => sum + row.encryptedBytes, 0);
+
+  await Integration.findByIdAndUpdate(integrationId, {
+    $set: {
+      'authKeyStats.keyCount': keyCount,
+      'authKeyStats.encryptedBytes': encryptedBytes,
+      'authKeyStats.categories': categories,
+      'authKeyStats.updatedAt': new Date(),
+    },
+  });
+
+}
+
+// Signal keys can change several times for a single message. Debouncing keeps
+// the monitoring query inexpensive without ever delaying or pruning key writes.
+function scheduleAuthKeyStatsRefresh(integrationId) {
+  const key = String(integrationId);
+  if (pendingStatRefreshes.has(key)) return;
+
+  const timer = setTimeout(() => {
+    pendingStatRefreshes.delete(key);
+    refreshAuthKeyStats(integrationId).catch((err) => {
+      Sentry.captureException(err, { tags: { pipeline: 'whatsapp_auth_key_stats' } });
+    });
+  }, AUTH_KEY_STATS_REFRESH_MS);
+  pendingStatRefreshes.set(key, timer);
+}
 
 /**
  * Mongo-backed replacement for Baileys' useMultiFileAuthState — same shape
@@ -13,6 +59,8 @@ const { encrypt, decrypt } = require('../../utils/crypto');
 async function useMongoAuthState(integrationId) {
   const integration = await Integration.findById(integrationId);
   if (!integration) throw new Error(`Integration ${integrationId} not found.`);
+
+  scheduleAuthKeyStatsRefresh(integrationId);
 
   const creds = integration.credsEncrypted
     ? JSON.parse(decrypt(integration.credsEncrypted), BufferJSON.reviver)
@@ -49,7 +97,10 @@ async function useMongoAuthState(integrationId) {
           }
         }
       }
-      if (ops.length > 0) await WhatsAppAuthKey.bulkWrite(ops);
+      if (ops.length > 0) {
+        await WhatsAppAuthKey.bulkWrite(ops);
+        scheduleAuthKeyStatsRefresh(integrationId);
+      }
     },
   };
 
@@ -63,8 +114,16 @@ async function useMongoAuthState(integrationId) {
 }
 
 async function clearAuthState(integrationId) {
+  const key = String(integrationId);
+  const pendingTimer = pendingStatRefreshes.get(key);
+  if (pendingTimer) clearTimeout(pendingTimer);
+  pendingStatRefreshes.delete(key);
+
   await WhatsAppAuthKey.deleteMany({ integrationId });
-  await Integration.findByIdAndUpdate(integrationId, { credsEncrypted: null });
+  await Integration.findByIdAndUpdate(integrationId, {
+    credsEncrypted: null,
+    authKeyStats: { keyCount: 0, encryptedBytes: 0, categories: {}, updatedAt: new Date() },
+  });
 }
 
 module.exports = { useMongoAuthState, clearAuthState };

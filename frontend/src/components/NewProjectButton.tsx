@@ -9,6 +9,7 @@ export function NewProjectButton({ onCreated }: { onCreated: () => void }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
   useClickOutside(containerRef, () => setOpen(false), open);
@@ -16,8 +17,9 @@ export function NewProjectButton({ onCreated }: { onCreated: () => void }) {
   const handleCreate = async () => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    const res = await projectsApi.create(trimmed);
+    const res = await projectsApi.create(trimmed, description.trim());
     setName('');
+    setDescription('');
     setOpen(false);
     onCreated();
     navigate(`/projects/${res.project.id}/chat`);
@@ -49,6 +51,14 @@ export function NewProjectButton({ onCreated }: { onCreated: () => void }) {
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
               placeholder="Project name"
               className="w-full rounded-md border border-neutral-200 px-2.5 py-1.5 text-xs text-ink outline-none focus:border-magenta-500"
+            />
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={2000}
+              rows={2}
+              placeholder="What is this project for? (optional)"
+              className="mt-1.5 w-full resize-none rounded-md border border-neutral-200 px-2.5 py-1.5 text-xs text-ink outline-none focus:border-magenta-500"
             />
             <div className="mt-1.5 flex justify-end gap-2">
               <button

@@ -22,10 +22,12 @@ export const projectsApi = {
 
   get: (projectId: string) => api.get<{ project: Project }>(`/projects/${projectId}`),
 
-  create: (name: string) => api.post<{ project: Project }>('/projects', { name }),
+  create: (name: string, description = '') => api.post<{ project: Project }>('/projects', { name, description }),
 
-  update: (projectId: string, name: string) =>
-    api.patch<{ project: Project }>(`/projects/${projectId}`, { name }),
+  update: (projectId: string, values: { name?: string; description?: string }) =>
+    api.patch<{ project: Project }>(`/projects/${projectId}`, values),
+
+  delete: (projectId: string) => api.delete<{ message: string }>(`/projects/${projectId}`),
 
   listMembers: (projectId: string) => api.get<{ members: ProjectMember[] }>(`/projects/${projectId}/members`),
 

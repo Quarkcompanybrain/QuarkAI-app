@@ -13,6 +13,7 @@ router.post('/', ctrl.createProject);
 router.get('/', ctrl.listMyProjects);
 router.get('/:projectId', requireProjectMember, ctrl.getProject);
 router.patch('/:projectId', requireProjectMember, ctrl.updateProject);
+router.delete('/:projectId', requireProjectMember, ctrl.deleteProject);
 router.get('/:projectId/members', requireProjectMember, ctrl.listProjectMembers);
 router.post('/:projectId/members', requireProjectMember, ctrl.addProjectMember);
 router.delete('/:projectId/members/:userId', requireProjectMember, ctrl.removeProjectMember);

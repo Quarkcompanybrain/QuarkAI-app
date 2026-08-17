@@ -10,6 +10,23 @@ const whatsappChatSchema = new Schema(
     name: { type: String, default: '' },
     isGroup: { type: Boolean, default: false },
     lastMessageAt: { type: Date, default: null },
+    // A bounded plaintext copy of the most recent text/caption is useful when
+    // inspecting the parent chat document. Full history remains encrypted in
+    // WhatsAppMessage, rather than growing this record without limit.
+    lastMessageId: { type: String, default: null },
+    lastMessageText: { type: String, default: null },
+    lastMessageType: { type: String, default: null },
+    lastMessageFromMe: { type: Boolean, default: false },
+    memory: {
+      hasIngestedMessages: { type: Boolean, default: false },
+      ingestedMessageCount: { type: Number, default: 0 },
+      projectIds: [{ type: Schema.Types.ObjectId, ref: 'Project' }],
+      lastIngestedAt: { type: Date, default: null },
+      lastIngestedMessageId: { type: String, default: null },
+      // The full, per-message Chunk relationship lives on WhatsAppMessage;
+      // this is only a bounded summary for the parent chat record.
+      lastMemoryChunkIds: [{ type: Schema.Types.ObjectId, ref: 'Chunk' }],
+    },
   },
   { timestamps: true }
 );

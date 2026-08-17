@@ -36,7 +36,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshProjects();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeOrg]);
+  }, [activeOrg, location.pathname]);
 
   // Re-check recent chats on every navigation — cheap, and it's how a session
   // created or auto-titled elsewhere (ChatPanel) shows up here without a

@@ -14,6 +14,12 @@ const listIntegrations = asyncHandler(async (req, res) => {
       status: i.status,
       phoneNumber: i.phoneNumber,
       lastConnectedAt: i.lastConnectedAt,
+      authKeyStats: {
+        keyCount: i.authKeyStats?.keyCount || 0,
+        encryptedBytes: i.authKeyStats?.encryptedBytes || 0,
+        categories: i.authKeyStats?.categories || {},
+        updatedAt: i.authKeyStats?.updatedAt || null,
+      },
     })),
   });
 });
@@ -74,9 +80,25 @@ const listChats = asyncHandler(async (req, res) => {
   const integration = await Integration.findOne({ _id: req.params.id, userId: req.user.id });
   if (!integration) throw new ApiError(404, 'Integration not found.');
 
-  const chats = await WhatsAppChat.find({ integrationId: integration._id }).sort({ lastMessageAt: -1 });
+  // A LID is a WhatsApp-internal identifier, not a useful source label. The
+  // picker uses the stable phone/group JID cached from chat history instead.
+  const chats = await WhatsAppChat.find({ integrationId: integration._id, jid: { $not: /@lid$/ } }).sort({ lastMessageAt: -1 });
   res.json({
-    chats: chats.map((c) => ({ jid: c.jid, name: c.name, isGroup: c.isGroup, lastMessageAt: c.lastMessageAt })),
+    chats: chats.map((c) => ({
+      jid: c.jid,
+      name: c.name,
+      isGroup: c.isGroup,
+      lastMessageAt: c.lastMessageAt,
+      lastMessageId: c.lastMessageId || null,
+      lastMessageText: c.lastMessageText || null,
+      lastMessageType: c.lastMessageType || null,
+      lastMessageFromMe: c.lastMessageFromMe || false,
+      hasIngestedMessages: c.memory?.hasIngestedMessages || false,
+      ingestedMessageCount: c.memory?.ingestedMessageCount || 0,
+      linkedProjectIds: c.memory?.projectIds || [],
+      lastIngestedAt: c.memory?.lastIngestedAt || null,
+      lastMemoryChunkIds: c.memory?.lastMemoryChunkIds || [],
+    })),
   });
 });
 

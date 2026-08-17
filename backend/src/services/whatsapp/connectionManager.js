@@ -6,6 +6,7 @@ const {
   makeCacheableSignalKeyStore,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } = require('baileys');
 const { useMongoAuthState, clearAuthState } = require('./authState');
 const Integration = require('../../models/Integration');
@@ -40,7 +41,7 @@ function jidToChatName(jid, pushName) {
 
 async function cacheChats(integrationId, chats) {
   if (!chats?.length) return;
-  const ops = chats.map((chat) => ({
+  const ops = chats.filter((chat) => !chat.id?.endsWith('@lid')).map((chat) => ({
     updateOne: {
       filter: { integrationId, jid: chat.id },
       update: {
@@ -54,6 +55,45 @@ async function cacheChats(integrationId, chats) {
     },
   }));
   await WhatsAppChat.bulkWrite(ops, { ordered: false }).catch(() => {});
+}
+
+// Groups arrive with a subject in chat events. Direct chats get their saved
+// contact name through Baileys contact events. Only use the stable phone JID:
+// a LID is internal to WhatsApp and must never create a picker row.
+async function cacheContacts(integrationId, contacts) {
+  const ops = (contacts || []).flatMap((contact) => {
+    const jid = contact.phoneNumber || (contact.id?.endsWith('@lid') ? null : contact.id);
+    const name = contact.name || contact.notify || contact.verifiedName || contact.username;
+    if (!jid || !name) return [];
+    return [{
+      updateOne: {
+        filter: { integrationId, jid },
+        update: { $set: { name, isGroup: false } },
+        upsert: true,
+      },
+    }];
+  });
+  if (ops.length > 0) await WhatsAppChat.bulkWrite(ops, { ordered: false }).catch(() => {});
+}
+
+// WhatsApp does not always include every group in a light history sync. Fetch
+// the connected account's participating groups on connection so the source
+// picker can offer all groups, not only those that recently produced events.
+async function cacheParticipatingGroups(integrationId, groups) {
+  const ops = Object.values(groups || {}).map((group) => ({
+    updateOne: {
+      filter: { integrationId, jid: group.id },
+      update: {
+        $set: {
+          name: group.subject || group.id,
+          isGroup: true,
+          lastMessageAt: group.creation ? new Date(Number(group.creation) * 1000) : undefined,
+        },
+      },
+      upsert: true,
+    },
+  }));
+  if (ops.length > 0) await WhatsAppChat.bulkWrite(ops, { ordered: false });
 }
 
 async function connectIntegration(integrationId) {
@@ -71,6 +111,9 @@ async function connectIntegration(integrationId) {
       keys: makeCacheableSignalKeyStore(state.keys, logger),
     },
     logger,
+    // Explicitly retain the default so sends made through this linked device
+    // are emitted as message events and enter the same durable pipeline.
+    emitOwnEvents: true,
     syncFullHistory: false,
     markOnlineOnConnect: false,
   });
@@ -97,6 +140,13 @@ async function connectIntegration(integrationId) {
       });
       emit(integrationId, { type: 'connected', phoneNumber });
       Sentry.logger.info('WhatsApp integration connected', { integrationId: key, phoneNumber });
+
+      try {
+        const groups = await sock.groupFetchAllParticipating();
+        await cacheParticipatingGroups(integrationId, groups);
+      } catch (err) {
+        Sentry.captureException(err, { tags: { pipeline: 'whatsapp_group_cache' }, extra: { integrationId: key } });
+      }
     }
 
     if (connection === 'close') {
@@ -127,10 +177,29 @@ async function connectIntegration(integrationId) {
     cacheChats(integrationId, chats).catch(() => {});
   });
 
+  sock.ev.on('contacts.upsert', (contacts) => {
+    cacheContacts(integrationId, contacts).catch(() => {});
+  });
+
+  sock.ev.on('contacts.update', (contacts) => {
+    cacheContacts(integrationId, contacts).catch(() => {});
+  });
+
   sock.ev.on('messages.upsert', ({ messages, type }) => {
-    if (type !== 'notify') return;
+    console.log('WhatsApp messages.upsert', { integrationId, type, messages: messages.map((m) => ({ id: m.key?.id, fromMe: m.key?.fromMe, jid: m.key?.remoteJid })) });
     for (const msg of messages) {
-      handleIncomingMessage(integrationId, msg).catch((err) => {
+      // Baileys reports live inbound messages as `notify`. Messages sent from
+      // the linked phone can arrive as either `notify` or `append`; accept the
+      // latter only when authored by the connected account so we do not ingest
+      // historic inbound traffic during a sync/reconnect.
+      const isLiveMessage = type === 'notify';
+      const isOwnAppendedMessage = type === 'append' && msg.key?.fromMe;
+      if (!isLiveMessage && !isOwnAppendedMessage) continue;
+
+      handleIncomingMessage(integrationId, msg, {
+        downloadMedia: () =>
+          downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: (mediaMessage) => sock.updateMediaMessage(mediaMessage) }),
+      }).catch((err) => {
         Sentry.captureException(err, { tags: { pipeline: 'whatsapp_ingest' } });
       });
     }
@@ -163,9 +232,6 @@ async function reconnectAllActiveIntegrations() {
     connectIntegration(integration._id).catch((err) => {
       Sentry.captureException(err, { tags: { pipeline: 'whatsapp_boot_reconnect' } });
     });
-  }
-  if (active.length > 0) {
-    console.log(`[whatsapp] reconnecting ${active.length} previously connected account(s)`);
   }
 }
 

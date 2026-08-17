@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { authApi } from '../features/auth/api';
 import { orgApi } from '../features/org/api';
@@ -15,8 +16,9 @@ import { ApiRequestError } from '../lib/api';
  * one otherwise). Wraps all routes under ProtectedRoute so this only runs once.
  */
 export function SessionBoot({ children }: { children: ReactNode }) {
-  const { orgs, activeOrg, setSession, setOrgs, setActiveOrg } = useAuthStore();
+  const { orgs, activeOrg, setSession, setOrgs, setActiveOrg, logout } = useAuthStore();
   const [loading, setLoading] = useState(true);
+  const [sessionInvalid, setSessionInvalid] = useState(false);
 
   useEffect(() => {
     authApi
@@ -26,11 +28,19 @@ export function SessionBoot({ children }: { children: ReactNode }) {
         setOrgs(res.orgs);
         if (!activeOrg && res.orgs[0]) setActiveOrg({ orgId: res.orgs[0].orgId, role: res.orgs[0].role });
       })
+      .catch(() => {
+        // A failed /me call must never be treated as a user with no orgs.
+        // In particular, an expired JWT should return to sign-in instead of
+        // showing the organization-creation screen.
+        logout();
+        setSessionInvalid(true);
+      })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading) return null;
+  if (sessionInvalid) return <Navigate to="/login" replace />;
   if (orgs.length === 0) return <CreateOrgPrompt />;
 
   return <>{children}</>;

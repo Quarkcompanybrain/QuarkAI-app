@@ -19,6 +19,7 @@ export interface ActiveOrg {
 export interface Project {
   id: string;
   name: string;
+  description: string;
   createdBy: string;
   createdAt: string;
 }
@@ -68,6 +69,15 @@ export interface WhatsAppChat {
   name: string;
   isGroup: boolean;
   lastMessageAt: string | null;
+  lastMessageId?: string | null;
+  lastMessageText?: string | null;
+  lastMessageType?: string | null;
+  lastMessageFromMe?: boolean;
+  hasIngestedMessages?: boolean;
+  ingestedMessageCount?: number;
+  linkedProjectIds?: string[];
+  lastIngestedAt?: string | null;
+  lastMemoryChunkIds?: string[];
 }
 
 export interface ProjectSource {

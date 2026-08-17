@@ -74,13 +74,20 @@ function parseChunkArray(rawText) {
  * candidate piece).
  */
 async function splitFileIntoChunks(handlerOutput, filename) {
+  console.info('[file][split] AI input', {
+    filename,
+    kind: handlerOutput.kind,
+    mediaType: handlerOutput.mediaType || null,
+    text: handlerOutput.kind === 'text' ? handlerOutput.text : null,
+    binaryBytes: handlerOutput.kind === 'file' ? Buffer.byteLength(handlerOutput.base64, 'base64') : null,
+  });
   const response = await anthropic.messages.create({
     model: env.anthropicChunkModel,
     max_tokens: 8192,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: buildContentBlocks(handlerOutput, filename) }],
   });
-
+  console.info('[file][split] AI output', { filename, stopReason: response.stop_reason, content: response.content });
   const textBlock = response.content.find((block) => block.type === 'text');
   if (!textBlock) return fallbackChunks(handlerOutput);
 

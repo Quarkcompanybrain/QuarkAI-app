@@ -16,6 +16,19 @@ const fileSchema = new Schema(
       default: 'pending',
     },
     failureReason: { type: String, default: null },
+    // Files arriving through a WhatsApp source still use the same S3 and
+    // extraction pipeline as uploads, while retaining their source context.
+    sourceType: { type: String, enum: ['upload', 'whatsapp'], default: 'upload' },
+    whatsapp: {
+      integrationId: { type: Schema.Types.ObjectId, ref: 'Integration', default: null },
+      sourceMessageId: { type: Schema.Types.ObjectId, ref: 'WhatsAppMessage', default: null },
+      chatJid: { type: String, default: null },
+      chatName: { type: String, default: null },
+      sender: { type: String, default: null },
+      senderName: { type: String, default: null },
+      fromMe: { type: Boolean, default: false },
+      messageTimestamp: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

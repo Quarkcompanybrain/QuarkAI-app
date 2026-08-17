@@ -1,5 +1,6 @@
 const Sentry = require('@sentry/node');
 const Integration = require('../models/Integration');
+const ProjectSource = require('../models/ProjectSource');
 const WhatsAppChat = require('../models/WhatsAppChat');
 const { connectIntegration, disconnectIntegration, subscribe } = require('../services/whatsapp/connectionManager');
 const { ApiError } = require('../utils/ApiError');
@@ -76,9 +77,19 @@ const disconnectWhatsapp = asyncHandler(async (req, res) => {
   if (!integration) throw new ApiError(404, 'Integration not found.');
 
   await disconnectIntegration(integration._id);
-  await integration.softDelete(req.user.id);
+  const disconnectedAt = new Date();
+  const [sourceCleanup] = await Promise.all([
+    ProjectSource.updateMany(
+      { integrationId: integration._id, deletedAt: null },
+      { $set: { deletedAt: disconnectedAt, deletedBy: req.user.id } }
+    ),
+    integration.softDelete(req.user.id),
+  ]);
 
-  Sentry.logger.info('WhatsApp integration disconnected', { integrationId: String(integration._id) });
+  Sentry.logger.info('WhatsApp integration disconnected', {
+    integrationId: String(integration._id),
+    removedProjectSourceCount: sourceCleanup.modifiedCount,
+  });
   res.json({ message: 'Disconnected.' });
 });
 

@@ -50,4 +50,10 @@ export const projectsApi = {
 
   listWhatsAppMemory: (projectId: string) =>
     api.get<{ chunks: WhatsAppMemoryChunk[] }>(`/projects/${projectId}/whatsapp-memory`),
+
+  updateChunk: (projectId: string, chunkId: string, text: string) =>
+    api.patch<{ chunk: { id: string; text: string } }>(`/projects/${projectId}/chunks/${chunkId}`, { text }),
+
+  deleteChunk: (projectId: string, chunkId: string) =>
+    api.delete<{ message: string }>(`/projects/${projectId}/chunks/${chunkId}`),
 };

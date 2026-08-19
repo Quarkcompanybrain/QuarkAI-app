@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { filesApi, type FileChunk } from './api';
+import { projectsApi } from '../projects/api';
 import type { FileItem, FileStatus } from '../../types';
 import { PulseNode } from '../../components/PulseNode';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { EmptyState } from '../../components/EmptyState';
-import { EyeIcon, FileTextIcon, UploadIcon } from '../../components/icons';
+import { EyeIcon, FileTextIcon, PencilIcon, TrashIcon, UploadIcon } from '../../components/icons';
 
 const STATUS_LABEL: Record<FileStatus, string> = {
   pending: 'Queued',
@@ -21,7 +22,7 @@ const STATUS_STYLE: Record<FileStatus, string> = {
   failed: 'bg-magenta-50 text-magenta-600',
 };
 
-export function FilesPanel({ projectId }: { projectId?: string }) {
+export function FilesPanel({ projectId, canManageChunks = false }: { projectId?: string; canManageChunks?: boolean }) {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -115,7 +116,7 @@ export function FilesPanel({ projectId }: { projectId?: string }) {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, delay: Math.min(i * 0.03, 0.3), ease: [0.16, 1, 0.3, 1] }}
               >
-                <FileRow file={f} />
+                <FileRow file={f} projectId={projectId} canManageChunks={canManageChunks} />
               </motion.li>
             ))}
           </AnimatePresence>
@@ -141,11 +142,14 @@ export function FilesPanel({ projectId }: { projectId?: string }) {
   );
 }
 
-function FileRow({ file }: { file: FileItem }) {
+function FileRow({ file, projectId, canManageChunks }: { file: FileItem; projectId?: string; canManageChunks: boolean }) {
   const [viewing, setViewing] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [chunks, setChunks] = useState<FileChunk[] | null>(null);
   const [chunksError, setChunksError] = useState<string | null>(null);
+  const [editingChunkId, setEditingChunkId] = useState<string | null>(null);
+  const [chunkDraft, setChunkDraft] = useState('');
+  const [savingChunk, setSavingChunk] = useState(false);
 
   const handleView = async () => {
     setViewing(true);
@@ -169,6 +173,33 @@ function FileRow({ file }: { file: FileItem }) {
       } catch (err) {
         setChunksError(err instanceof Error ? err.message : 'Could not load memory.');
       }
+    }
+  };
+
+  const saveChunk = async () => {
+    if (!projectId || !editingChunkId || !chunkDraft.trim()) return;
+    setSavingChunk(true);
+    setChunksError(null);
+    try {
+      const result = await projectsApi.updateChunk(projectId, editingChunkId, chunkDraft);
+      setChunks((current) => current?.map((chunk) => (chunk.id === editingChunkId ? { ...chunk, text: result.chunk.text } : chunk)) || null);
+      setEditingChunkId(null);
+      setChunkDraft('');
+    } catch (err) {
+      setChunksError(err instanceof Error ? err.message : 'Could not update this knowledge entry.');
+    } finally {
+      setSavingChunk(false);
+    }
+  };
+
+  const deleteChunk = async (chunkId: string) => {
+    if (!projectId || !window.confirm('Delete this saved knowledge entry?')) return;
+    setChunksError(null);
+    try {
+      await projectsApi.deleteChunk(projectId, chunkId);
+      setChunks((current) => current?.filter((chunk) => chunk.id !== chunkId) || null);
+    } catch (err) {
+      setChunksError(err instanceof Error ? err.message : 'Could not delete this knowledge entry.');
     }
   };
 
@@ -232,12 +263,25 @@ function FileRow({ file }: { file: FileItem }) {
               ) : (
                 <ul className="flex flex-col gap-2">
                   {chunks.map((c) => (
-                    <li
-                      key={c.id}
-                      className="rounded-md border border-neutral-150 bg-white p-2.5 font-mono text-xs leading-relaxed text-neutral-700"
-                    >
-                      <span className="mb-1 block font-sans font-medium text-neutral-400">Chunk {c.chunkIndex + 1}</span>
-                      {c.text}
+                    <li key={c.id} className="rounded-md border border-neutral-150 bg-white p-2.5 font-mono text-xs leading-relaxed text-neutral-700">
+                      <div className="mb-1 flex items-center justify-between gap-2 font-sans">
+                        <span className="font-medium text-neutral-400">Chunk {c.chunkIndex + 1}</span>
+                        {canManageChunks && editingChunkId !== c.id && (
+                          <span className="flex gap-1">
+                            <button onClick={() => { setEditingChunkId(c.id); setChunkDraft(c.text); }} aria-label={`Edit chunk ${c.chunkIndex + 1}`} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-magenta-600"><PencilIcon className="h-3 w-3" /></button>
+                            <button onClick={() => deleteChunk(c.id)} aria-label={`Delete chunk ${c.chunkIndex + 1}`} className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-magenta-600"><TrashIcon className="h-3 w-3" /></button>
+                          </span>
+                        )}
+                      </div>
+                      {editingChunkId === c.id ? (
+                        <div className="font-sans">
+                          <textarea value={chunkDraft} onChange={(event) => setChunkDraft(event.target.value)} rows={5} className="w-full resize-y rounded-md border border-neutral-200 p-2 text-xs leading-relaxed text-ink outline-none focus:border-magenta-500" />
+                          <div className="mt-2 flex justify-end gap-2">
+                            <button onClick={() => { setEditingChunkId(null); setChunkDraft(''); }} disabled={savingChunk} className="rounded px-2 py-1 text-xs font-medium text-neutral-500 hover:bg-neutral-100">Cancel</button>
+                            <button onClick={saveChunk} disabled={savingChunk || !chunkDraft.trim()} className="rounded bg-ink px-2 py-1 text-xs font-medium text-white hover:bg-neutral-700 disabled:bg-neutral-200">{savingChunk ? 'Saving…' : 'Save'}</button>
+                          </div>
+                        </div>
+                      ) : c.text}
                     </li>
                   ))}
                 </ul>

@@ -23,6 +23,7 @@ export interface Project {
   websiteUrl?: string;
   createdBy: string;
   createdAt: string;
+  canManageMemory?: boolean;
 }
 
 export type FileStatus = 'pending' | 'in_progress' | 'done' | 'failed';

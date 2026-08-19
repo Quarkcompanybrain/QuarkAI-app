@@ -6,6 +6,7 @@ const projectMembershipSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true },
     orgId: { type: Schema.Types.ObjectId, ref: 'Org', required: true },
+    role: { type: String, enum: ['admin', 'member'], default: 'member' },
     joinedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

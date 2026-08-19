@@ -1,12 +1,11 @@
 const { anthropic } = require('../../config/anthropic');
 const env = require('../../config/env');
 const { buildIngestTools, executeIngestTool } = require('./tools');
-const { currentUtcDateTimeContext } = require('../../utils/aiContext');
 
 const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document or a single chat message. Decide what to do with it:
 
 1. Call search_memory first to check whether related or contradicting information is already stored.
-2. For a potentially useful WhatsApp message that depends on earlier discussion, call get_whatsapp_chat_context before deciding. It returns a bounded, private window of older messages from the same chat. Use it to resolve references, decisions, and updates; do not save a fragment that loses its meaning without that context.
+2. For a potentially useful WhatsApp message that depends on earlier discussion, call get_whatsapp_chat_context before deciding. Select focused query parameters (sender, direction, time range, type, reply, mention, text, or ingestion state) based on what you need to resolve. It only searches the same chat. Use it to resolve references, decisions, and updates; do not save a fragment that loses its meaning without that context.
 3. If this is new information worth remembering (a fact, decision, update, instruction, or detail someone might later search for), call save_memory with a self-contained version of it — rephrase only as needed for it to make sense on its own, keeping the original wording and context as much as possible.
 4. If it updates or corrects something search_memory found, call edit_memory on that entry instead of creating a duplicate.
 5. If it has no lasting informational value (greetings, small talk, acknowledgements, emoji reactions, or something already fully captured), don't call save_memory or edit_memory at all — you're done.
@@ -26,6 +25,10 @@ function projectContextPrompt(projectContext) {
   return `\n\nThis candidate is for the project "${projectContext.name}".${description ? ` Its purpose is: ${description}` : ''}${websiteUrl ? ` Its website is: ${websiteUrl}` : ''} Only save information that is genuinely relevant to this project’s purpose, work, people, product, customers, decisions, or website. Skip unrelated chat, personal discussion, and generic information even when it has lasting value elsewhere.`;
 }
 
+function currentDateTimePrompt() {
+  return `\n\nCurrent server date and time: ${new Date().toISOString()} (UTC). Use this to interpret relative dates and times; do not treat it as content to save.`;
+}
+
 function candidateContent(text, metadata) {
   if (!metadata?.sourceMessageId) return text;
 
@@ -42,7 +45,7 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
     const response = await anthropic.messages.create({
       model: env.anthropicChunkModel,
       max_tokens: 1024,
-      system: `${SYSTEM_PROMPT}${currentUtcDateTimeContext()} Use this to interpret relative dates and times; do not treat it as content to save.${projectContextPrompt(projectContext)}`,
+      system: `${SYSTEM_PROMPT}${currentDateTimePrompt()}${projectContextPrompt(projectContext)}`,
       tools: buildIngestTools(sourceType),
       messages,
     });

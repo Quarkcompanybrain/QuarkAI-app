@@ -33,9 +33,9 @@ const whatsappMessageSchema = new Schema(
     senderPhoneNumber: { type: String, default: null },
     fromMe: { type: Boolean, required: true },
     messageType: { type: String, required: true },
-    // Message content is encrypted with the integration key. It is retained
-    // for auditability and future replay, but never exposed by this model.
-    contentEncrypted: { type: String, default: null },
+    // Exact text/caption, stored as plaintext so it can be inspected and
+    // queried directly alongside the rest of the message record.
+    content: { type: String, default: null },
     quotedMessageId: { type: String, default: null },
     mentionedJids: { type: [String], default: [] },
     sentAt: { type: Date, required: true },
@@ -55,6 +55,9 @@ const whatsappMessageSchema = new Schema(
 // WhatsApp message from being stored or ingested more than once.
 whatsappMessageSchema.index({ integrationId: 1, messageId: 1, chatJid: 1, fromMe: 1 }, { unique: true });
 whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, sentAt: -1 });
+whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, fromMe: 1, sentAt: -1 });
+whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, senderJid: 1, sentAt: -1 });
+whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, content: 'text' });
 whatsappMessageSchema.index({ 'projectIngestions.projectId': 1 });
 
 module.exports = model('WhatsAppMessage', whatsappMessageSchema);

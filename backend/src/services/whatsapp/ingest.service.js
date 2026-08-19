@@ -10,7 +10,6 @@ const { splitFileIntoChunks } = require('../memory/split.service');
 const { buildKey, uploadBuffer } = require('../storage/s3.service');
 const { processFile } = require('../processing/processFile');
 const { SUPPORTED_MIME_TYPES } = require('../file_handlers/registry');
-const { encrypt } = require('../../utils/crypto');
 const { normalizeMessageContent } = require('baileys');
 
 const MAX_UNSPLIT_MESSAGE_LENGTH = 2000;
@@ -227,7 +226,7 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
     senderPhoneNumber: sender.senderPhoneNumber,
     fromMe: sender.fromMe,
     messageType,
-    contentEncrypted: text ? encrypt(text) : null,
+    content: text || null,
     quotedMessageId: contextInfo?.stanzaId || null,
     mentionedJids: contextInfo?.mentionedJid || [],
     sentAt,

@@ -34,7 +34,7 @@ async function processFile(fileId) {
     let savedCount = 0;
     let editedCount = 0;
     const chunkIds = [];
-    const project = file.projectId ? await Project.findById(file.projectId).select('name description').lean() : null;
+    const project = file.projectId ? await Project.findById(file.projectId).select('name description websiteUrl').lean() : null;
 
     for (const [index, text] of candidateChunks.entries()) {
       const outcome = await decideAndStore({
@@ -49,7 +49,7 @@ async function processFile(fileId) {
           chunkIndex: index,
           ...(file.sourceType === 'whatsapp' ? file.whatsapp.toObject?.() || file.whatsapp : {}),
         },
-        projectContext: project ? { name: project.name, description: project.description } : null,
+        projectContext: project ? { name: project.name, description: project.description, websiteUrl: project.websiteUrl } : null,
       });
       if (outcome.action === 'saved') savedCount++;
       if (outcome.action === 'edited') editedCount++;

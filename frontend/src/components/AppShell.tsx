@@ -65,7 +65,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     recentChats,
     location,
     onLogout: handleLogout,
-    onCreatedProject: refreshProjects,
   };
 
   return (
@@ -138,7 +137,6 @@ interface SidebarBodyProps {
   recentChats: ChatSessionSummary[];
   location: ReturnType<typeof useLocation>;
   onLogout: () => void;
-  onCreatedProject: () => void;
 }
 
 function SidebarBody({
@@ -149,7 +147,6 @@ function SidebarBody({
   recentChats,
   location,
   onLogout,
-  onCreatedProject,
 }: SidebarBodyProps) {
   const currentOrg = orgs.find((o) => o.orgId === activeOrg?.orgId);
   const initials = (user?.name || user?.email || '?').trim().charAt(0).toUpperCase();
@@ -195,7 +192,7 @@ function SidebarBody({
       <nav className="flex flex-col gap-0.5">
         <div className="flex items-center justify-between px-3">
           <span className="text-xs font-medium uppercase tracking-wide text-neutral-400">Projects</span>
-          <NewProjectButton onCreated={onCreatedProject} />
+          <NewProjectButton />
         </div>
 
         {projects.length === 0 && <p className="px-3 py-1 text-xs text-neutral-400">No projects yet.</p>}

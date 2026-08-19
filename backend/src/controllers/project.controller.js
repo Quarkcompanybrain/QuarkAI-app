@@ -9,22 +9,41 @@ const ChatSession = require('../models/ChatSession');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
+function normalizeWebsiteUrl(value) {
+  if (!value) return '';
+  const url = String(value).trim();
+  if (!url) return '';
+  try {
+    const parsed = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url : `https://${url}`);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported protocol');
+    return parsed.toString();
+  } catch {
+    throw new ApiError(400, 'websiteUrl must be a valid http or https URL.');
+  }
+}
+
 const createProject = asyncHandler(async (req, res) => {
-  const { name, description = '' } = req.body;
+  const { name, description = '', websiteUrl = '' } = req.body;
   if (!name) throw new ApiError(400, 'name is required.');
 
-  const project = await Project.create({ name, description, orgId: req.org.id, createdBy: req.user.id });
+  const project = await Project.create({
+    name,
+    description,
+    websiteUrl: normalizeWebsiteUrl(websiteUrl),
+    orgId: req.org.id,
+    createdBy: req.user.id,
+  });
   await ProjectMembership.create({ userId: req.user.id, projectId: project._id, orgId: req.org.id });
 
   Sentry.logger.info('Project created', { projectId: String(project._id), orgId: req.org.id });
-  res.status(201).json({ project: { id: project._id, name: project.name, description: project.description, orgId: project.orgId } });
+  res.status(201).json({ project: { id: project._id, name: project.name, description: project.description, websiteUrl: project.websiteUrl, orgId: project.orgId } });
 });
 
 // Only projects the caller is a member of, within the active org.
 const listMyProjects = asyncHandler(async (req, res) => {
   const memberships = await ProjectMembership.find({ userId: req.user.id, orgId: req.org.id }).populate(
     'projectId',
-    'name description createdBy createdAt'
+    'name description websiteUrl createdBy createdAt'
   );
 
   res.json({
@@ -34,6 +53,7 @@ const listMyProjects = asyncHandler(async (req, res) => {
         id: m.projectId._id,
         name: m.projectId.name,
         description: m.projectId.description,
+        websiteUrl: m.projectId.websiteUrl,
         createdBy: m.projectId.createdBy,
         createdAt: m.projectId.createdAt,
       })),
@@ -43,12 +63,12 @@ const listMyProjects = asyncHandler(async (req, res) => {
 const getProject = asyncHandler(async (req, res) => {
   const project = await Project.findOne({ _id: req.projectId, orgId: req.org.id });
   if (!project) throw new ApiError(404, 'Project not found.');
-  res.json({ project: { id: project._id, name: project.name, description: project.description, createdBy: project.createdBy, createdAt: project.createdAt } });
+  res.json({ project: { id: project._id, name: project.name, description: project.description, websiteUrl: project.websiteUrl, createdBy: project.createdBy, createdAt: project.createdAt } });
 });
 
 const updateProject = asyncHandler(async (req, res) => {
-  const { name, description } = req.body;
-  if (name === undefined && description === undefined) throw new ApiError(400, 'name or description is required.');
+  const { name, description, websiteUrl } = req.body;
+  if (name === undefined && description === undefined && websiteUrl === undefined) throw new ApiError(400, 'name, description, or websiteUrl is required.');
   if (name !== undefined && !String(name).trim()) throw new ApiError(400, 'name cannot be empty.');
 
   const project = await Project.findOne({ _id: req.projectId, orgId: req.org.id });
@@ -56,10 +76,11 @@ const updateProject = asyncHandler(async (req, res) => {
 
   if (name !== undefined) project.name = name;
   if (description !== undefined) project.description = description;
+  if (websiteUrl !== undefined) project.websiteUrl = normalizeWebsiteUrl(websiteUrl);
   await project.save();
 
   Sentry.logger.info('Project updated', { projectId: String(project._id) });
-  res.json({ project: { id: project._id, name: project.name, description: project.description } });
+  res.json({ project: { id: project._id, name: project.name, description: project.description, websiteUrl: project.websiteUrl } });
 });
 
 // Project deletion is recoverable: every project-owned record is soft deleted

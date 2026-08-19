@@ -1,4 +1,5 @@
 const Chunk = require('../../models/Chunk');
+const WhatsAppMessage = require('../../models/WhatsAppMessage');
 const { embedText } = require('../embeddings/openai.service');
 const { insertChunks, searchChunks } = require('../vectorstore/atlas.service');
 
@@ -46,7 +47,77 @@ const EDIT_MEMORY_TOOL = {
   },
 };
 
-const INGEST_TOOLS = [SEARCH_MEMORY_TOOL, SAVE_MEMORY_TOOL, EDIT_MEMORY_TOOL];
+const WHATSAPP_CHAT_CONTEXT_TOOL = {
+  name: 'get_whatsapp_chat_context',
+  description:
+    'Query stored messages from this same WhatsApp chat. Choose only the filter parameters needed to resolve the current message: direction, sender, date range, message type, quoted message, mentions, text, or ingestion state. The integration and chat are always locked to the current message, so this tool cannot read another chat. Use focused queries first, then page farther back or broaden filters only when needed.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      limit: { type: 'integer', description: 'Number of messages to return, from 1 to 50. Prefer a small focused result.' },
+      beforeSentAt: { type: 'string', description: 'Optional ISO timestamp. Return messages before this point; use the previous response cursor to page backward.' },
+      afterSentAt: { type: 'string', description: 'Optional ISO timestamp. Return messages at or after this point.' },
+      direction: { type: 'string', enum: ['all', 'sent', 'received'], description: 'Filter by messages sent by the connected account, received from others, or both.' },
+      senderJids: { type: 'array', items: { type: 'string' }, description: 'Optional exact sender JIDs to include, especially useful for group participants.' },
+      senderNames: { type: 'array', items: { type: 'string' }, description: 'Optional sender names to match case-insensitively.' },
+      messageTypes: { type: 'array', items: { type: 'string' }, description: 'Optional message types to include, such as text, extended_text, image, or document.' },
+      quotedMessageId: { type: 'string', description: 'Optional WhatsApp message ID. Return replies to that message.' },
+      mentionedJid: { type: 'string', description: 'Optional JID. Return messages that mention it.' },
+      textSearch: { type: 'string', description: 'Optional word-based full-text search over plaintext content. Prefer this for topical searches.' },
+      textContains: { type: 'string', description: 'Optional literal text fragment to search in stored plaintext message content.' },
+      hasIngestedMemory: { type: 'boolean', description: 'Optional filter for whether a message already produced memory.' },
+      maxCharsPerMessage: { type: 'integer', description: 'Maximum content characters per result, from 200 to 4000. Increase only when exact wording matters.' },
+    },
+  },
+};
+
+function buildIngestTools(sourceType) {
+  return sourceType === 'whatsapp'
+    ? [SEARCH_MEMORY_TOOL, WHATSAPP_CHAT_CONTEXT_TOOL, SAVE_MEMORY_TOOL, EDIT_MEMORY_TOOL]
+    : [SEARCH_MEMORY_TOOL, SAVE_MEMORY_TOOL, EDIT_MEMORY_TOOL];
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseTimestamp(value, fieldName) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(`${fieldName} must be a valid ISO timestamp.`);
+  return date;
+}
+
+function formatWhatsAppContextMessage(message, maxCharsPerMessage) {
+  const text = message.content?.trim() || null;
+  const sender = message.senderName || message.senderJid || (message.fromMe ? 'You' : 'Unknown sender');
+  return {
+    recordId: String(message._id),
+    messageId: message.messageId,
+    sentAt: message.sentAt,
+    receivedAt: message.receivedAt,
+    sender,
+    senderDetails: {
+      jid: message.senderJid || null,
+      name: message.senderName || null,
+      phoneNumber: message.senderPhoneNumber || null,
+      fromMe: message.fromMe,
+    },
+    chat: {
+      jid: message.chatJid,
+      name: message.chatName || null,
+      isGroup: message.isGroup,
+      eventJid: message.eventChatJid,
+      eventJidAlt: message.eventChatJidAlt || null,
+    },
+    messageType: message.messageType,
+    quotedMessageId: message.quotedMessageId || null,
+    mentionedJids: message.mentionedJids || [],
+    hasIngestedMemory: message.hasIngestedMemory,
+    ingestionStatus: message.ingestionStatus,
+    text: text && text.length > maxCharsPerMessage ? `${text.slice(0, maxCharsPerMessage)}…` : text,
+  };
+}
 
 /**
  * Executes one tool call against real storage. `ctx` carries the scoping
@@ -68,6 +139,49 @@ async function executeIngestTool(name, input, ctx) {
       topK: 5,
     });
     return { message: JSON.stringify(results.map((r) => ({ id: String(r._id), text: r.text }))) };
+  }
+
+  if (name === 'get_whatsapp_chat_context') {
+    if (ctx.sourceType !== 'whatsapp' || !ctx.metadata?.integrationId || !ctx.metadata?.chatJid || !ctx.metadata?.messageTimestamp) {
+      return { message: 'WhatsApp chat context is unavailable for this candidate.' };
+    }
+
+    const limit = Math.max(1, Math.min(Number(input.limit) || 12, 50));
+    const maxCharsPerMessage = Math.max(200, Math.min(Number(input.maxCharsPerMessage) || 1500, 4000));
+    const beforeSentAt = parseTimestamp(input.beforeSentAt, 'beforeSentAt') || new Date(ctx.metadata.messageTimestamp);
+    const afterSentAt = parseTimestamp(input.afterSentAt, 'afterSentAt');
+    const filter = {
+      integrationId: ctx.metadata.integrationId,
+      chatJid: ctx.metadata.chatJid,
+      _id: { $ne: ctx.metadata.sourceMessageId },
+      content: { $type: 'string', $ne: '' },
+      sentAt: { $lte: beforeSentAt },
+    };
+    if (afterSentAt) filter.sentAt.$gte = afterSentAt;
+    if (input.direction === 'sent') filter.fromMe = true;
+    if (input.direction === 'received') filter.fromMe = false;
+    if (Array.isArray(input.senderJids) && input.senderJids.length) filter.senderJid = { $in: input.senderJids.slice(0, 20) };
+    if (Array.isArray(input.senderNames) && input.senderNames.length) {
+      filter.senderName = { $in: input.senderNames.slice(0, 10).map((name) => new RegExp(escapeRegex(String(name).slice(0, 120)), 'i')) };
+    }
+    if (Array.isArray(input.messageTypes) && input.messageTypes.length) filter.messageType = { $in: input.messageTypes.slice(0, 20) };
+    if (input.quotedMessageId) filter.quotedMessageId = String(input.quotedMessageId).slice(0, 200);
+    if (input.mentionedJid) filter.mentionedJids = String(input.mentionedJid).slice(0, 200);
+    if (input.textSearch) filter.$text = { $search: String(input.textSearch).slice(0, 300) };
+    if (input.textContains) filter.content = { $regex: escapeRegex(String(input.textContains).slice(0, 200)), $options: 'i' };
+    if (typeof input.hasIngestedMemory === 'boolean') filter.hasIngestedMemory = input.hasIngestedMemory;
+
+    const messages = await WhatsAppMessage.find(filter)
+      .sort({ sentAt: -1 })
+      .limit(limit)
+      .select('messageId chatJid eventChatJid eventChatJidAlt chatName isGroup senderJid senderName senderPhoneNumber fromMe messageType quotedMessageId mentionedJids sentAt receivedAt content hasIngestedMemory ingestionStatus')
+      .lean();
+    const context = messages.reverse().map((message) => formatWhatsAppContextMessage(message, maxCharsPerMessage));
+    return {
+      message: context.length
+        ? JSON.stringify({ messages: context, nextBeforeSentAt: context[0].sentAt, appliedFilters: input })
+        : 'No matching readable messages were found in this chat.',
+    };
   }
 
   if (name === 'save_memory') {
@@ -103,4 +217,4 @@ async function executeIngestTool(name, input, ctx) {
   return { message: `Unknown tool: ${name}` };
 }
 
-module.exports = { INGEST_TOOLS, SEARCH_MEMORY_TOOL, executeIngestTool };
+module.exports = { buildIngestTools, SEARCH_MEMORY_TOOL, executeIngestTool };

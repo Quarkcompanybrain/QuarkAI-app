@@ -26,6 +26,7 @@ const fileSchema = new Schema(
       chatName: { type: String, default: null },
       sender: { type: String, default: null },
       senderName: { type: String, default: null },
+      senderPhoneNumber: { type: String, default: null },
       fromMe: { type: Boolean, default: false },
       messageTimestamp: { type: Date, default: null },
     },

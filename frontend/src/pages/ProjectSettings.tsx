@@ -121,6 +121,7 @@ function ProjectDetailsForm({
 }) {
   const [name, setName] = useState(project?.name || '');
   const [description, setDescription] = useState(project?.description || '');
+  const [websiteUrl, setWebsiteUrl] = useState(project?.websiteUrl || '');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -129,6 +130,7 @@ function ProjectDetailsForm({
     if (project) {
       setName(project.name);
       setDescription(project.description || '');
+      setWebsiteUrl(project.websiteUrl || '');
     }
   }, [project]);
 
@@ -138,7 +140,7 @@ function ProjectDetailsForm({
     setSaved(false);
     setLoading(true);
     try {
-      await projectsApi.update(projectId, { name, description });
+      await projectsApi.update(projectId, { name, description, websiteUrl });
       onRenamed();
       setSaved(true);
     } catch (err) {
@@ -166,6 +168,17 @@ function ProjectDetailsForm({
             className="w-full resize-y rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-ink shadow-xs outline-none transition-all placeholder:text-neutral-400 hover:border-neutral-300 focus:border-magenta-500 focus:shadow-[0_0_0_3px_rgba(255,27,205,0.10)]"
           />
           <span className="text-xs text-neutral-400">This helps Quark decide whether incoming files and WhatsApp messages belong in this project's memory.</span>
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-ink">Website URL</span>
+          <input
+            value={websiteUrl}
+            onChange={(e) => setWebsiteUrl(e.target.value)}
+            placeholder="https://example.com"
+            inputMode="url"
+            className="w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-ink shadow-xs outline-none transition-all placeholder:text-neutral-400 hover:border-neutral-300 focus:border-magenta-500 focus:shadow-[0_0_0_3px_rgba(255,27,205,0.10)]"
+          />
+          <span className="text-xs text-neutral-400">This is context for relevance decisions; Quark does not automatically crawl the URL.</span>
         </label>
         <div className="flex justify-end"><Button type="submit" loading={loading}>Save</Button></div>
       </form>

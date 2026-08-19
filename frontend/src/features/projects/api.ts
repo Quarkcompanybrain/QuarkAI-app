@@ -22,9 +22,9 @@ export const projectsApi = {
 
   get: (projectId: string) => api.get<{ project: Project }>(`/projects/${projectId}`),
 
-  create: (name: string, description = '') => api.post<{ project: Project }>('/projects', { name, description }),
+  create: (values: { name: string; description?: string; websiteUrl?: string }) => api.post<{ project: Project }>('/projects', values),
 
-  update: (projectId: string, values: { name?: string; description?: string }) =>
+  update: (projectId: string, values: { name?: string; description?: string; websiteUrl?: string }) =>
     api.patch<{ project: Project }>(`/projects/${projectId}`, values),
 
   delete: (projectId: string) => api.delete<{ message: string }>(`/projects/${projectId}`),

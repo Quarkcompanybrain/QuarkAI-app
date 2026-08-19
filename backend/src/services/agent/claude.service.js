@@ -33,7 +33,7 @@ async function streamAnswer({ history, orgId, scope, projectId, ownerId, onToken
     const stream = anthropic.messages.stream({
       model: env.anthropicChatModel,
       max_tokens: 2048,
-      system: SYSTEM_PROMPT,
+      system: `${SYSTEM_PROMPT}\n\nCurrent server date and time: ${new Date().toISOString()} (UTC). Use this to interpret relative dates such as today, tomorrow, and last week.`,
       tools: [GET_KNOWLEDGE_TOOL],
       messages,
     });

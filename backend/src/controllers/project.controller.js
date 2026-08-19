@@ -14,7 +14,7 @@ function normalizeWebsiteUrl(value) {
   const url = String(value).trim();
   if (!url) return '';
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url : `https://${url}`);
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported protocol');
     return parsed.toString();
   } catch {

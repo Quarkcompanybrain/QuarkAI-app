@@ -1,6 +1,7 @@
 const { anthropic } = require('../../config/anthropic');
 const env = require('../../config/env');
 const { buildIngestTools, executeIngestTool } = require('./tools');
+const { currentUtcDateTimeContext } = require('../../utils/aiContext');
 
 const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document or a single chat message. Decide what to do with it:
 
@@ -25,10 +26,6 @@ function projectContextPrompt(projectContext) {
   return `\n\nThis candidate is for the project "${projectContext.name}".${description ? ` Its purpose is: ${description}` : ''}${websiteUrl ? ` Its website is: ${websiteUrl}` : ''} Only save information that is genuinely relevant to this project’s purpose, work, people, product, customers, decisions, or website. Skip unrelated chat, personal discussion, and generic information even when it has lasting value elsewhere.`;
 }
 
-function currentDateTimePrompt() {
-  return `\n\nCurrent server date and time: ${new Date().toISOString()} (UTC). Use this to interpret relative dates and times; do not treat it as content to save.`;
-}
-
 function candidateContent(text, metadata) {
   if (!metadata?.sourceMessageId) return text;
 
@@ -45,7 +42,7 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
     const response = await anthropic.messages.create({
       model: env.anthropicChunkModel,
       max_tokens: 1024,
-      system: `${SYSTEM_PROMPT}${currentDateTimePrompt()}${projectContextPrompt(projectContext)}`,
+      system: `${SYSTEM_PROMPT}${currentUtcDateTimeContext()} Use this to interpret relative dates and times; do not treat it as content to save.${projectContextPrompt(projectContext)}`,
       tools: buildIngestTools(sourceType),
       messages,
     });

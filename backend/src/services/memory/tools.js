@@ -74,10 +74,27 @@ function formatWhatsAppContextMessage(message) {
     if (!text) return null;
     const sender = message.senderName || message.senderJid || (message.fromMe ? 'You' : 'Unknown sender');
     return {
+      recordId: String(message._id),
+      messageId: message.messageId,
       sentAt: message.sentAt,
+      receivedAt: message.receivedAt,
       sender,
-      senderJid: message.senderJid || null,
-      fromMe: message.fromMe,
+      senderDetails: {
+        jid: message.senderJid || null,
+        name: message.senderName || null,
+        phoneNumber: message.senderPhoneNumber || null,
+        fromMe: message.fromMe,
+      },
+      chat: {
+        jid: message.chatJid,
+        name: message.chatName || null,
+        isGroup: message.isGroup,
+        eventJid: message.eventChatJid,
+        eventJidAlt: message.eventChatJidAlt || null,
+      },
+      messageType: message.messageType,
+      quotedMessageId: message.quotedMessageId || null,
+      mentionedJids: message.mentionedJids || [],
       text,
     };
   } catch {
@@ -125,7 +142,7 @@ async function executeIngestTool(name, input, ctx) {
     })
       .sort({ sentAt: -1 })
       .limit(limit)
-      .select('senderJid senderName fromMe sentAt contentEncrypted')
+      .select('messageId chatJid eventChatJid eventChatJidAlt chatName isGroup senderJid senderName senderPhoneNumber fromMe messageType quotedMessageId mentionedJids sentAt receivedAt contentEncrypted')
       .lean();
     const context = messages.reverse().map(formatWhatsAppContextMessage).filter(Boolean);
     return {

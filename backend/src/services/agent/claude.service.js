@@ -2,6 +2,7 @@ const { anthropic } = require('../../config/anthropic');
 const env = require('../../config/env');
 const { embedText } = require('../embeddings/openai.service');
 const { searchChunks } = require('../vectorstore/atlas.service');
+const { currentUtcDateTimeContext } = require('../../utils/aiContext');
 
 const SYSTEM_PROMPT = `You are Quark AI, a company-knowledge assistant. You have a get_knowledge tool that searches the user's stored knowledge base. Proactively use it for every substantive question unless it is clearly a simple greeting, small talk, or a purely general request with no possible connection to the user's organization, projects, files, decisions, or conversations. When in doubt, search first: the knowledge base may hold helpful context even if the question does not explicitly mention a file or project. You may call it more than once if the first search does not cover the question. When you use retrieved knowledge, ground the answer in it and do not contradict it. If a search turns up nothing relevant, say that no relevant stored knowledge was found, then provide a clearly-labelled general answer only when useful.`;
 
@@ -18,10 +19,6 @@ const GET_KNOWLEDGE_TOOL = {
   },
 };
 
-function currentDateTimePrompt() {
-  return `\n\nCurrent server date and time: ${new Date().toISOString()} (UTC). Use this to interpret relative dates such as today, tomorrow, and last week.`;
-}
-
 /**
  * Streams a Claude response, letting the model decide via the get_knowledge
  * tool whether retrieval is needed at all (e.g. "hi" never triggers a vector
@@ -37,7 +34,7 @@ async function streamAnswer({ history, orgId, scope, projectId, ownerId, onToken
     const stream = anthropic.messages.stream({
       model: env.anthropicChatModel,
       max_tokens: 2048,
-      system: `${SYSTEM_PROMPT}${currentDateTimePrompt()}`,
+      system: `${SYSTEM_PROMPT}${currentUtcDateTimeContext()} Use this to interpret relative dates such as today, tomorrow, and last week.`,
       tools: [GET_KNOWLEDGE_TOOL],
       messages,
     });

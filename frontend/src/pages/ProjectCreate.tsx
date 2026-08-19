@@ -67,8 +67,8 @@ export function ProjectCreate() {
 
   if (createdProjectId && uploadFailures.length > 0) {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-10">
-        <div className="mx-auto max-w-xl rounded-2xl border border-magenta-100 bg-white p-7 shadow-sm">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6">
+        <div className="max-w-3xl rounded-2xl border border-magenta-100 bg-white p-7 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-magenta-600">Project created</p>
           <h1 className="mt-2 font-display text-2xl font-semibold text-ink">Some context files could not be uploaded</h1>
           <p className="mt-2 text-sm leading-6 text-neutral-600">You can upload these again from the project’s Memory tab.</p>
@@ -84,17 +84,16 @@ export function ProjectCreate() {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-10">
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6">
       <motion.main
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-        className="mx-auto max-w-2xl"
+        className="max-w-3xl"
       >
-        <div className="border-l-2 border-magenta-500 pl-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-magenta-600">New project</p>
-          <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-ink">Give Quark a clear brief.</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-neutral-600">This context lets Quark distinguish your project’s knowledge from unrelated conversation.</p>
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-ink">Create project</h1>
+          <p className="mt-1 text-sm text-neutral-500">Give Quark enough context to separate this project’s knowledge from unrelated conversation.</p>
         </div>
 
         <form onSubmit={submit} className="mt-8 space-y-6">

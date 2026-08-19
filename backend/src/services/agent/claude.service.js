@@ -18,6 +18,10 @@ const GET_KNOWLEDGE_TOOL = {
   },
 };
 
+function currentDateTimePrompt() {
+  return `\n\nCurrent server date and time: ${new Date().toISOString()} (UTC). Use this to interpret relative dates such as today, tomorrow, and last week.`;
+}
+
 /**
  * Streams a Claude response, letting the model decide via the get_knowledge
  * tool whether retrieval is needed at all (e.g. "hi" never triggers a vector
@@ -33,7 +37,7 @@ async function streamAnswer({ history, orgId, scope, projectId, ownerId, onToken
     const stream = anthropic.messages.stream({
       model: env.anthropicChatModel,
       max_tokens: 2048,
-      system: SYSTEM_PROMPT,
+      system: `${SYSTEM_PROMPT}${currentDateTimePrompt()}`,
       tools: [GET_KNOWLEDGE_TOOL],
       messages,
     });

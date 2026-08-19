@@ -66,6 +66,25 @@ function preferredChatJid(candidates) {
   return candidates.find((jid) => jid.endsWith('@s.whatsapp.net')) || candidates[0];
 }
 
+function senderPhoneNumber(senderJid) {
+  const number = senderJid?.split('@')[0]?.split(':')[0] || '';
+  return /^\d+$/.test(number) ? number : null;
+}
+
+function resolveSender({ message, integration, chatJid, isGroup, existingChat, senderChat }) {
+  const fromMe = Boolean(message.key?.fromMe);
+  const ownJid = integration.phoneNumber ? `${integration.phoneNumber}@s.whatsapp.net` : null;
+  const senderJid = fromMe
+    ? message.key?.participant || ownJid || chatJid
+    : message.key?.participant || chatJid;
+  const eventName = message.pushName?.trim();
+  const senderName = fromMe
+    ? 'You'
+    : eventName || senderChat?.name || (!isGroup ? existingChat?.name : null) || senderJid;
+
+  return { fromMe, senderJid, senderName, senderPhoneNumber: senderPhoneNumber(senderJid) };
+}
+
 async function createMessageRecord(data) {
   try {
     return await WhatsAppMessage.create(data);
@@ -79,7 +98,7 @@ async function messageCandidates(text) {
   return text.length <= MAX_UNSPLIT_MESSAGE_LENGTH ? [text] : splitFileIntoChunks({ kind: 'text', text }, 'WhatsApp message');
 }
 
-async function ingestTextForProject({ messageRecord, source, integration, text, senderJid, senderName, projectContext }) {
+async function ingestTextForProject({ messageRecord, source, integration, text, senderJid, senderName, senderPhoneNumber, projectContext }) {
   const candidates = await messageCandidates(text);
   const chunkIds = [];
   let skippedCount = 0;
@@ -97,6 +116,7 @@ async function ingestTextForProject({ messageRecord, source, integration, text, 
         chatName: source.chatName || messageRecord.chatName,
         sender: senderJid,
         senderName,
+        senderPhoneNumber,
         fromMe: messageRecord.fromMe,
         sourceMessageId: messageRecord._id,
         whatsappMessageId: messageRecord.messageId,
@@ -110,7 +130,7 @@ async function ingestTextForProject({ messageRecord, source, integration, text, 
   return { chunkIds, skippedCount, totalCount: candidates.length };
 }
 
-async function ingestAttachmentForProject({ buffer, attachment, messageRecord, source, integration, senderJid, senderName }) {
+async function ingestAttachmentForProject({ buffer, attachment, messageRecord, source, integration, senderJid, senderName, senderPhoneNumber }) {
   const filename = attachmentFilename(attachment, messageRecord.sentAt);
   const key = buildKey({ orgId: source.orgId, projectId: source.projectId, ownerId: integration.userId, filename });
   await uploadBuffer({ key, buffer, mimeType: attachment.mimeType });
@@ -130,6 +150,7 @@ async function ingestAttachmentForProject({ buffer, attachment, messageRecord, s
       chatName: source.chatName || messageRecord.chatName,
       sender: senderJid,
       senderName,
+      senderPhoneNumber,
       fromMe: messageRecord.fromMe,
       messageTimestamp: messageRecord.sentAt,
     },
@@ -173,8 +194,11 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
   const { text, messageType, contextInfo, attachment } = describeMessage(message);
   const isGroup = chatJid.endsWith('@g.us');
   const sentAt = messageSentAt(message);
-  const senderJid = message.key.fromMe ? null : message.key.participant || chatJid;
-  const senderName = message.pushName || null;
+  const rawSenderJid = message.key?.fromMe
+    ? message.key?.participant || (integration.phoneNumber ? `${integration.phoneNumber}@s.whatsapp.net` : null)
+    : message.key?.participant || chatJid;
+  const senderChat = rawSenderJid ? await WhatsAppChat.findOne({ integrationId, jid: rawSenderJid }).lean() : null;
+  const sender = resolveSender({ message, integration, chatJid, isGroup, existingChat, senderChat });
   const chat = await WhatsAppChat.findOneAndUpdate(
     { integrationId, jid: chatJid },
     {
@@ -186,7 +210,7 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
         lastMessageType: messageType,
         lastMessageFromMe: Boolean(message.key.fromMe),
       },
-      $setOnInsert: { name: senderName || chatJid },
+      $setOnInsert: { name: isGroup ? existingChat?.name || chatJid : sender.senderName || chatJid },
     },
     { new: true, upsert: true, setDefaultsOnInsert: true }
   );
@@ -198,9 +222,10 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
     eventChatJidAlt: message.key?.remoteJidAlt || null,
     chatName: chat.name || chatJid,
     isGroup,
-    senderJid,
-    senderName,
-    fromMe: Boolean(message.key.fromMe),
+    senderJid: sender.senderJid,
+    senderName: sender.senderName,
+    senderPhoneNumber: sender.senderPhoneNumber,
+    fromMe: sender.fromMe,
     messageType,
     contentEncrypted: text ? encrypt(text) : null,
     quotedMessageId: contextInfo?.stanzaId || null,
@@ -252,16 +277,34 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
     const chunkIds = [];
     const fileIds = [];
     try {
-      const project = await Project.findById(source.projectId).select('name description').lean();
-      const projectContext = project ? { name: project.name, description: project.description } : null;
+      const project = await Project.findById(source.projectId).select('name description websiteUrl').lean();
+      const projectContext = project ? { name: project.name, description: project.description, websiteUrl: project.websiteUrl } : null;
       let skippedCount = 0;
       if (text) {
-        const textResult = await ingestTextForProject({ messageRecord, source, integration, text, senderJid, senderName, projectContext });
+        const textResult = await ingestTextForProject({
+          messageRecord,
+          source,
+          integration,
+          text,
+          senderJid: sender.senderJid,
+          senderName: sender.senderName,
+          senderPhoneNumber: sender.senderPhoneNumber,
+          projectContext,
+        });
         chunkIds.push(...textResult.chunkIds);
         skippedCount += textResult.skippedCount;
       }
       if (supportedAttachment) {
-        const attachmentResult = await ingestAttachmentForProject({ buffer: await getAttachmentBuffer(), attachment, messageRecord, source, integration, senderJid, senderName });
+        const attachmentResult = await ingestAttachmentForProject({
+          buffer: await getAttachmentBuffer(),
+          attachment,
+          messageRecord,
+          source,
+          integration,
+          senderJid: sender.senderJid,
+          senderName: sender.senderName,
+          senderPhoneNumber: sender.senderPhoneNumber,
+        });
         fileIds.push(attachmentResult.fileId);
         chunkIds.push(...attachmentResult.chunkIds);
         if (attachmentResult.chunkIds.length === 0) skippedCount++;

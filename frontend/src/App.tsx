@@ -14,6 +14,7 @@ import { ProjectLayout } from './pages/ProjectLayout';
 import { ProjectChat } from './pages/ProjectChat';
 import { ProjectMemory } from './pages/ProjectMemory';
 import { ProjectSettings } from './pages/ProjectSettings';
+import { ProjectCreate } from './pages/ProjectCreate';
 import { Members } from './pages/Members';
 import { useAuthStore } from './store/authStore';
 import { SessionBoot } from './components/SessionBoot';
@@ -57,6 +58,8 @@ export default function App() {
             <Route path="chat" element={<PersonalChat />} />
             <Route path="files" element={<PersonalFiles />} />
           </Route>
+
+          <Route path="/projects/new" element={<ProjectCreate />} />
 
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<Navigate to="chat" replace />} />

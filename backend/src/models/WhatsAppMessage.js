@@ -30,6 +30,7 @@ const whatsappMessageSchema = new Schema(
     isGroup: { type: Boolean, default: false },
     senderJid: { type: String, default: null },
     senderName: { type: String, default: null },
+    senderPhoneNumber: { type: String, default: null },
     fromMe: { type: Boolean, required: true },
     messageType: { type: String, required: true },
     // Message content is encrypted with the integration key. It is retained

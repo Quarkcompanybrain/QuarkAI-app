@@ -19,6 +19,7 @@ const chunkSchema = new Schema(
       chatName: String,
       sender: String,
       senderName: String,
+      senderPhoneNumber: String,
       fromMe: Boolean,
       sourceMessageId: { type: Schema.Types.ObjectId, ref: 'WhatsAppMessage' },
       whatsappMessageId: String,

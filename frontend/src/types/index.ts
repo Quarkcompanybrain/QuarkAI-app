@@ -20,6 +20,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  websiteUrl?: string;
   createdBy: string;
   createdAt: string;
 }

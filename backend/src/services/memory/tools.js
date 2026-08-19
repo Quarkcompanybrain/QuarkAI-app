@@ -1,6 +1,8 @@
 const Chunk = require('../../models/Chunk');
+const WhatsAppMessage = require('../../models/WhatsAppMessage');
 const { embedText } = require('../embeddings/openai.service');
 const { insertChunks, searchChunks } = require('../vectorstore/atlas.service');
+const { decrypt } = require('../../utils/crypto');
 
 // Shared by both the ingestion decision loop (memory/ingest.service.js) and
 // chat retrieval (agent/claude.service.js) — one search implementation
@@ -46,7 +48,42 @@ const EDIT_MEMORY_TOOL = {
   },
 };
 
-const INGEST_TOOLS = [SEARCH_MEMORY_TOOL, SAVE_MEMORY_TOOL, EDIT_MEMORY_TOOL];
+const WHATSAPP_CHAT_CONTEXT_TOOL = {
+  name: 'get_whatsapp_chat_context',
+  description:
+    'Fetch a bounded window of older messages from this same WhatsApp chat. Use when a potentially useful message refers to earlier discussion, an unclear decision, people, dates, or pronouns that need context. This tool is only available while ingesting a WhatsApp message.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      limit: { type: 'integer', description: 'How many older messages to fetch, from 1 to 20. Use enough to understand the discussion.' },
+      beforeSentAt: { type: 'string', description: 'Optional ISO timestamp from a previous response. Use it to page farther back in the same chat.' },
+    },
+  },
+};
+
+function buildIngestTools(sourceType) {
+  return sourceType === 'whatsapp'
+    ? [SEARCH_MEMORY_TOOL, WHATSAPP_CHAT_CONTEXT_TOOL, SAVE_MEMORY_TOOL, EDIT_MEMORY_TOOL]
+    : [SEARCH_MEMORY_TOOL, SAVE_MEMORY_TOOL, EDIT_MEMORY_TOOL];
+}
+
+function formatWhatsAppContextMessage(message) {
+  if (!message.contentEncrypted) return null;
+  try {
+    const text = decrypt(message.contentEncrypted).trim();
+    if (!text) return null;
+    const sender = message.senderName || message.senderJid || (message.fromMe ? 'You' : 'Unknown sender');
+    return {
+      sentAt: message.sentAt,
+      sender,
+      senderJid: message.senderJid || null,
+      fromMe: message.fromMe,
+      text,
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Executes one tool call against real storage. `ctx` carries the scoping
@@ -68,6 +105,34 @@ async function executeIngestTool(name, input, ctx) {
       topK: 5,
     });
     return { message: JSON.stringify(results.map((r) => ({ id: String(r._id), text: r.text }))) };
+  }
+
+  if (name === 'get_whatsapp_chat_context') {
+    if (ctx.sourceType !== 'whatsapp' || !ctx.metadata?.integrationId || !ctx.metadata?.chatJid || !ctx.metadata?.messageTimestamp) {
+      return { message: 'WhatsApp chat context is unavailable for this candidate.' };
+    }
+
+    const limit = Math.max(1, Math.min(Number(input.limit) || 12, 20));
+    const hasCursor = Boolean(input.beforeSentAt);
+    const beforeSentAt = hasCursor ? new Date(input.beforeSentAt) : new Date(ctx.metadata.messageTimestamp);
+    if (Number.isNaN(beforeSentAt.getTime())) return { message: 'beforeSentAt must be a valid ISO timestamp.' };
+    const messages = await WhatsAppMessage.find({
+      integrationId: ctx.metadata.integrationId,
+      chatJid: ctx.metadata.chatJid,
+      _id: { $ne: ctx.metadata.sourceMessageId },
+      sentAt: { [hasCursor ? '$lt' : '$lte']: beforeSentAt },
+      contentEncrypted: { $ne: null },
+    })
+      .sort({ sentAt: -1 })
+      .limit(limit)
+      .select('senderJid senderName fromMe sentAt contentEncrypted')
+      .lean();
+    const context = messages.reverse().map(formatWhatsAppContextMessage).filter(Boolean);
+    return {
+      message: context.length
+        ? JSON.stringify({ messages: context, nextBeforeSentAt: context[0].sentAt })
+        : 'No older readable messages were found in this chat.',
+    };
   }
 
   if (name === 'save_memory') {
@@ -103,4 +168,4 @@ async function executeIngestTool(name, input, ctx) {
   return { message: `Unknown tool: ${name}` };
 }
 
-module.exports = { INGEST_TOOLS, SEARCH_MEMORY_TOOL, executeIngestTool };
+module.exports = { buildIngestTools, SEARCH_MEMORY_TOOL, executeIngestTool };

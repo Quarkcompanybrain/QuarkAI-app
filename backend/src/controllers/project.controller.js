@@ -33,7 +33,7 @@ const createProject = asyncHandler(async (req, res) => {
     orgId: req.org.id,
     createdBy: req.user.id,
   });
-  await ProjectMembership.create({ userId: req.user.id, projectId: project._id, orgId: req.org.id });
+  await ProjectMembership.create({ userId: req.user.id, projectId: project._id, orgId: req.org.id, role: 'admin' });
 
   Sentry.logger.info('Project created', { projectId: String(project._id), orgId: req.org.id });
   res.status(201).json({ project: { id: project._id, name: project.name, description: project.description, websiteUrl: project.websiteUrl, orgId: project.orgId } });
@@ -63,7 +63,8 @@ const listMyProjects = asyncHandler(async (req, res) => {
 const getProject = asyncHandler(async (req, res) => {
   const project = await Project.findOne({ _id: req.projectId, orgId: req.org.id });
   if (!project) throw new ApiError(404, 'Project not found.');
-  res.json({ project: { id: project._id, name: project.name, description: project.description, websiteUrl: project.websiteUrl, createdBy: project.createdBy, createdAt: project.createdAt } });
+  const canManageMemory = req.projectMembership?.role === 'admin' || String(project.createdBy) === String(req.user.id);
+  res.json({ project: { id: project._id, name: project.name, description: project.description, websiteUrl: project.websiteUrl, createdBy: project.createdBy, createdAt: project.createdAt, canManageMemory } });
 });
 
 const updateProject = asyncHandler(async (req, res) => {
@@ -115,6 +116,7 @@ const listProjectMembers = asyncHandler(async (req, res) => {
       userId: m.userId._id,
       email: m.userId.email,
       name: m.userId.name,
+      role: m.role,
       joinedAt: m.joinedAt,
     })),
   });
@@ -131,7 +133,7 @@ const addProjectMember = asyncHandler(async (req, res) => {
   const existing = await ProjectMembership.findOne({ userId, projectId: req.projectId });
   if (existing) throw new ApiError(409, 'That user is already on the project.');
 
-  await ProjectMembership.create({ userId, projectId: req.projectId, orgId: req.org.id });
+  await ProjectMembership.create({ userId, projectId: req.projectId, orgId: req.org.id, role: 'member' });
   Sentry.logger.info('Project member added', { projectId: req.projectId, userId });
   res.status(201).json({ message: 'Added to project.' });
 });

@@ -1,27 +1,72 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useOutletContext, useParams } from 'react-router-dom';
 import { FilesPanel } from '../features/files/FilesPanel';
 import { projectsApi, type WhatsAppMemoryChunk } from '../features/projects/api';
 import { PulseNode } from '../components/PulseNode';
 import { EmptyState } from '../components/EmptyState';
-import { ChatBubbleIcon } from '../components/icons';
+import { ErrorBanner } from '../components/ErrorBanner';
+import { ChatBubbleIcon, PencilIcon, TrashIcon } from '../components/icons';
+import type { Project } from '../types';
+
+interface ProjectOutletContext {
+  project: Project | null;
+}
 
 export function ProjectMemory() {
   const { projectId = '' } = useParams();
+  const { project } = useOutletContext<ProjectOutletContext>();
   const [chunks, setChunks] = useState<WhatsAppMemoryChunk[] | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setChunks(null);
     projectsApi.listWhatsAppMemory(projectId).then((r) => setChunks(r.chunks));
   }, [projectId]);
 
+  const startEditing = (chunk: WhatsAppMemoryChunk) => {
+    setEditingId(chunk.id);
+    setDraft(chunk.text);
+    setError(null);
+  };
+
+  const saveChunk = async () => {
+    if (!editingId || !draft.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await projectsApi.updateChunk(projectId, editingId, draft);
+      setChunks((current) => current?.map((chunk) => (chunk.id === editingId ? { ...chunk, text: result.chunk.text } : chunk)) || null);
+      setEditingId(null);
+      setDraft('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update this knowledge entry.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteChunk = async (chunkId: string) => {
+    if (!window.confirm('Delete this saved knowledge entry?')) return;
+    setError(null);
+    try {
+      await projectsApi.deleteChunk(projectId, chunkId);
+      setChunks((current) => current?.filter((chunk) => chunk.id !== chunkId) || null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete this knowledge entry.');
+    }
+  };
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6">
       <div className="flex flex-col gap-8">
-        <FilesPanel projectId={projectId} />
+        <FilesPanel projectId={projectId} canManageChunks={Boolean(project?.canManageMemory)} />
 
         <section>
           <h2 className="mb-4 font-display text-lg font-semibold text-ink">WhatsApp knowledge</h2>
+          <ErrorBanner message={error} />
 
           {chunks === null ? (
             <p className="flex items-center gap-2 text-sm text-neutral-500">
@@ -49,8 +94,24 @@ export function ProjectMemory() {
                         </p>
                       )}
                     </div>
-                    <p className="mt-1 text-sm text-ink">{c.text}</p>
+                    {editingId === c.id ? (
+                      <div className="mt-2">
+                        <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={4} className="w-full resize-y rounded-lg border border-neutral-200 px-3 py-2 text-sm leading-6 text-ink outline-none focus:border-magenta-500 focus:shadow-[0_0_0_3px_rgba(255,27,205,0.10)]" />
+                        <div className="mt-2 flex justify-end gap-2">
+                          <button onClick={() => { setEditingId(null); setDraft(''); }} disabled={saving} className="rounded-md px-2 py-1 text-xs font-medium text-neutral-500 hover:bg-neutral-100">Cancel</button>
+                          <button onClick={saveChunk} disabled={saving || !draft.trim()} className="rounded-md bg-ink px-2.5 py-1 text-xs font-medium text-white hover:bg-neutral-700 disabled:bg-neutral-200">{saving ? 'Saving…' : 'Save'}</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-sm text-ink">{c.text}</p>
+                    )}
                   </div>
+                  {project?.canManageMemory && editingId !== c.id && (
+                    <div className="flex shrink-0 gap-1">
+                      <button onClick={() => startEditing(c)} aria-label="Edit knowledge entry" className="rounded-md p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-magenta-600"><PencilIcon className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => deleteChunk(c.id)} aria-label="Delete knowledge entry" className="rounded-md p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-magenta-600"><TrashIcon className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

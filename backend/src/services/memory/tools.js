@@ -1,3 +1,4 @@
+const Sentry = require('@sentry/node');
 const Chunk = require('../../models/Chunk');
 const WhatsAppMessage = require('../../models/WhatsAppMessage');
 const { embedText } = require('../embeddings/openai.service');
@@ -28,6 +29,11 @@ const SAVE_MEMORY_TOOL = {
     type: 'object',
     properties: {
       text: { type: 'string', description: 'The knowledge to remember, written so it makes sense on its own.' },
+      sourceMessageIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'For a WhatsApp batch, the recordId values of every listed message that supports this memory. Omit for files or a single-message candidate.',
+      },
     },
     required: ['text'],
   },
@@ -42,6 +48,11 @@ const EDIT_MEMORY_TOOL = {
     properties: {
       chunkId: { type: 'string', description: 'The id of the existing memory entry to update (from search_memory).' },
       text: { type: 'string', description: 'The corrected/updated knowledge text.' },
+      sourceMessageIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'For a WhatsApp batch, the recordId values of every listed message that supports this update. Omit for files or a single-message candidate.',
+      },
     },
     required: ['chunkId', 'text'],
   },
@@ -119,6 +130,18 @@ function formatWhatsAppContextMessage(message, maxCharsPerMessage) {
   };
 }
 
+function sourceMessageIdsForTool(input, ctx) {
+  const batchIds = (ctx.metadata?.batchMessageIds || []).map(String);
+  if (batchIds.length === 0) return ctx.metadata?.sourceMessageId ? [String(ctx.metadata.sourceMessageId)] : [];
+
+  const requested = Array.isArray(input.sourceMessageIds) ? input.sourceMessageIds.map(String) : [];
+  const allowed = requested.filter((id) => batchIds.includes(id));
+  if (allowed.length === 0) {
+    throw new Error('A WhatsApp batch memory write must include one or more valid sourceMessageIds from the batch.');
+  }
+  return [...new Set(allowed)];
+}
+
 /**
  * Executes one tool call against real storage. `ctx` carries the scoping
  * info (org/project/personal + source metadata) so every write lands in the
@@ -127,9 +150,11 @@ function formatWhatsAppContextMessage(message, maxCharsPerMessage) {
  */
 async function executeIngestTool(name, input, ctx) {
   const scope = ctx.projectId ? 'project' : 'personal';
+  const traceId = ctx.metadata?.traceId;
 
   if (name === 'search_memory') {
-    const queryEmbedding = await embedText(input.query);
+    Sentry.logger.info('AI memory search started', { traceId, input, scope, orgId: ctx.orgId, projectId: ctx.projectId, ownerId: ctx.ownerId });
+    const queryEmbedding = await embedText(input.query, { traceId, operation: 'memory_search' });
     const results = await searchChunks({
       queryEmbedding,
       orgId: ctx.orgId,
@@ -138,7 +163,9 @@ async function executeIngestTool(name, input, ctx) {
       ownerId: ctx.ownerId,
       topK: 5,
     });
-    return { message: JSON.stringify(results.map((r) => ({ id: String(r._id), text: r.text }))) };
+    const result = { message: JSON.stringify(results.map((r) => ({ id: String(r._id), text: r.text }))) };
+    Sentry.logger.info('AI memory search completed', { traceId, input, resultCount: results.length, results, result });
+    return result;
   }
 
   if (name === 'get_whatsapp_chat_context') {
@@ -153,7 +180,9 @@ async function executeIngestTool(name, input, ctx) {
     const filter = {
       integrationId: ctx.metadata.integrationId,
       chatJid: ctx.metadata.chatJid,
-      _id: { $ne: ctx.metadata.sourceMessageId },
+      _id: ctx.metadata?.batchMessageIds?.length
+        ? { $nin: ctx.metadata.batchMessageIds }
+        : { $ne: ctx.metadata.sourceMessageId },
       content: { $type: 'string', $ne: '' },
       sentAt: { $lte: beforeSentAt },
     };
@@ -171,21 +200,26 @@ async function executeIngestTool(name, input, ctx) {
     if (input.textContains) filter.content = { $regex: escapeRegex(String(input.textContains).slice(0, 200)), $options: 'i' };
     if (typeof input.hasIngestedMemory === 'boolean') filter.hasIngestedMemory = input.hasIngestedMemory;
 
+    Sentry.logger.info('AI WhatsApp context query started', { traceId, input, filter, limit, maxCharsPerMessage });
     const messages = await WhatsAppMessage.find(filter)
       .sort({ sentAt: -1 })
       .limit(limit)
       .select('messageId chatJid eventChatJid eventChatJidAlt chatName isGroup senderJid senderName senderPhoneNumber fromMe messageType quotedMessageId mentionedJids sentAt receivedAt content hasIngestedMemory ingestionStatus')
       .lean();
     const context = messages.reverse().map((message) => formatWhatsAppContextMessage(message, maxCharsPerMessage));
-    return {
+    const result = {
       message: context.length
         ? JSON.stringify({ messages: context, nextBeforeSentAt: context[0].sentAt, appliedFilters: input })
         : 'No matching readable messages were found in this chat.',
     };
+    Sentry.logger.info('AI WhatsApp context query completed', { traceId, input, filter, matchedCount: context.length, context, result });
+    return result;
   }
 
   if (name === 'save_memory') {
-    const embedding = await embedText(input.text);
+    Sentry.logger.info('AI memory save started', { traceId, input, sourceType: ctx.sourceType, orgId: ctx.orgId, projectId: ctx.projectId, fileId: ctx.fileId, metadata: ctx.metadata });
+    const sourceMessageIds = sourceMessageIdsForTool(input, ctx);
+    const embedding = await embedText(input.text, { traceId, operation: 'memory_save' });
     const [doc] = await insertChunks([
       {
         sourceType: ctx.sourceType,
@@ -195,23 +229,40 @@ async function executeIngestTool(name, input, ctx) {
         ownerId: ctx.ownerId,
         text: input.text,
         embedding,
-        metadata: ctx.metadata,
+        metadata: {
+          ...ctx.metadata,
+          sourceMessageId: sourceMessageIds[0] || ctx.metadata?.sourceMessageId,
+          sourceMessageIds: sourceMessageIds.length ? sourceMessageIds : undefined,
+        },
       },
     ]);
-    return { message: 'Saved.', action: 'saved', chunkId: String(doc._id) };
+    const result = { message: 'Saved.', action: 'saved', chunkId: String(doc._id), sourceMessageIds };
+    Sentry.logger.info('AI memory save completed', { traceId, input, savedChunk: doc, result });
+    return result;
   }
 
   if (name === 'edit_memory') {
-    const embedding = await embedText(input.text);
+    Sentry.logger.info('AI memory edit started', { traceId, input, orgId: ctx.orgId, projectId: ctx.projectId, ownerId: ctx.ownerId });
+    const sourceMessageIds = sourceMessageIdsForTool(input, ctx);
+    const embedding = await embedText(input.text, { traceId, operation: 'memory_edit' });
     const scopeFilter = ctx.projectId
       ? { projectId: ctx.projectId }
       : { projectId: null, ownerId: ctx.ownerId };
     const updated = await Chunk.findOneAndUpdate(
       { _id: input.chunkId, orgId: ctx.orgId, deletedAt: null, ...scopeFilter },
-      { text: input.text, embedding }
+      {
+        $set: { text: input.text, embedding },
+        ...(sourceMessageIds.length ? { $addToSet: { 'metadata.sourceMessageIds': { $each: sourceMessageIds } } } : {}),
+      }
     );
-    if (!updated) return { message: 'That memory entry no longer exists.' };
-    return { message: 'Updated.', action: 'edited', chunkId: input.chunkId };
+    if (!updated) {
+      const result = { message: 'That memory entry no longer exists.' };
+      Sentry.logger.info('AI memory edit skipped', { traceId, input, result });
+      return result;
+    }
+    const result = { message: 'Updated.', action: 'edited', chunkId: input.chunkId, sourceMessageIds };
+    Sentry.logger.info('AI memory edit completed', { traceId, input, updatedChunk: updated, result });
+    return result;
   }
 
   return { message: `Unknown tool: ${name}` };

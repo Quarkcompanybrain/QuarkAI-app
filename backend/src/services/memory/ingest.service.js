@@ -1,13 +1,16 @@
+const Sentry = require('@sentry/node');
+const { randomUUID } = require('crypto');
 const { anthropic } = require('../../config/anthropic');
+const { openai } = require('../../config/openai');
 const env = require('../../config/env');
 const { buildIngestTools, executeIngestTool } = require('./tools');
 
-const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document or a single chat message. Decide what to do with it:
+const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document, a single chat message, or a chronological batch of WhatsApp messages. Decide what to do with it:
 
 1. Call search_memory first to check whether related or contradicting information is already stored.
 2. For a potentially useful WhatsApp message that depends on earlier discussion, call get_whatsapp_chat_context before deciding. Select focused query parameters (sender, direction, time range, type, reply, mention, text, or ingestion state) based on what you need to resolve. It only searches the same chat. Use it to resolve references, decisions, and updates; do not save a fragment that loses its meaning without that context.
-3. If this is new information worth remembering (a fact, decision, update, instruction, or detail someone might later search for), call save_memory with a self-contained version of it — rephrase only as needed for it to make sense on its own, keeping the original wording and context as much as possible.
-4. If it updates or corrects something search_memory found, call edit_memory on that entry instead of creating a duplicate.
+3. If this is new information worth remembering (a fact, decision, update, instruction, or detail someone might later search for), call save_memory with a self-contained version of it — rephrase only as needed for it to make sense on its own, keeping the original wording and context as much as possible. For a WhatsApp batch, include the recordId of every supporting message in sourceMessageIds, and combine messages only when they establish one coherent fact.
+4. If it updates or corrects something search_memory found, call edit_memory on that entry instead of creating a duplicate. For a WhatsApp batch, include the supporting recordIds in sourceMessageIds.
 5. If it has no lasting informational value (greetings, small talk, acknowledgements, emoji reactions, or something already fully captured), don't call save_memory or edit_memory at all — you're done.
 
 Respond only with tool calls, no commentary.`;
@@ -30,6 +33,7 @@ function currentDateTimePrompt() {
 }
 
 function candidateContent(text, metadata) {
+  if (metadata?.isBatch) return text;
   if (!metadata?.sourceMessageId) return text;
 
   const sentAt = metadata.messageTimestamp ? new Date(metadata.messageTimestamp).toISOString() : 'unknown';
@@ -37,36 +41,98 @@ function candidateContent(text, metadata) {
   return `WhatsApp message context:\n- Sender: ${sender}${metadata.sender ? ` (${metadata.sender})` : ''}\n- Sent at: ${sentAt}\n- Chat: ${metadata.chatName || metadata.chatJid || 'Unknown chat'}\n\nMessage:\n${text}`;
 }
 
+function openAiTools(sourceType) {
+  return buildIngestTools(sourceType).map((tool) => ({
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.input_schema,
+    },
+  }));
+}
+
 async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, text, metadata, projectContext }) {
-  const ctx = { orgId, projectId, ownerId, sourceType, fileId, metadata };
+  const traceId = metadata?.traceId || randomUUID();
+  const ctx = { orgId, projectId, ownerId, sourceType, fileId, metadata: { ...metadata, traceId } };
+  const useOpenAi = sourceType === 'whatsapp';
+  const provider = useOpenAi ? 'openai' : 'anthropic';
+  const model = useOpenAi ? env.openaiWhatsAppIngestionModel : env.anthropicChunkModel;
+  const maxTokens = metadata?.isBatch ? 2048 : 1024;
   const messages = [{ role: 'user', content: candidateContent(text, metadata) }];
-  let outcome = { action: 'skipped' };
-  for (let i = 0; i < 5; i++) {
-    const response = await anthropic.messages.create({
-      model: env.anthropicChunkModel,
-      max_tokens: 1024,
-      system: `${SYSTEM_PROMPT}${currentDateTimePrompt()}${projectContextPrompt(projectContext)}`,
-      tools: buildIngestTools(sourceType),
-      messages,
-    });
+  const system = `${SYSTEM_PROMPT}${currentDateTimePrompt()}${projectContextPrompt(projectContext)}`;
+  let outcome = { action: 'skipped', actions: [] };
+  Sentry.logger.info('AI memory ingestion started', { traceId, provider, model, orgId, projectId, ownerId, sourceType, fileId, metadata: ctx.metadata, projectContext, system, initialMessages: messages });
 
-    messages.push({ role: 'assistant', content: response.content });
-    if (response.stop_reason !== 'tool_use') break;
+  try {
+    for (let i = 0; i < 5; i++) {
+      Sentry.logger.info('AI memory ingestion model request', { traceId, provider, model, iteration: i + 1, messages });
+      if (useOpenAi) {
+        const response = await openai.chat.completions.create({
+          model,
+          max_tokens: maxTokens,
+          messages: [{ role: 'system', content: system }, ...messages],
+          tools: openAiTools(sourceType),
+        });
+        const assistantMessage = response.choices[0]?.message;
+        if (!assistantMessage) throw new Error('OpenAI returned no ingestion message.');
+        Sentry.logger.info('AI memory ingestion model response', { traceId, provider, model, iteration: i + 1, finishReason: response.choices[0]?.finish_reason, responseContent: assistantMessage, usage: response.usage });
+        messages.push(assistantMessage);
+        if (!assistantMessage.tool_calls?.length) break;
 
-    const toolResults = [];
-    for (const block of response.content) {
-      if (block.type !== 'tool_use') continue;
-      const result = await executeIngestTool(block.name, block.input, ctx);
-      if (result.action) outcome = { action: result.action, chunkId: result.chunkId };
-      toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result.message });
+        const toolResults = [];
+        for (const toolCall of assistantMessage.tool_calls) {
+          let input;
+          try {
+            input = JSON.parse(toolCall.function.arguments || '{}');
+          } catch {
+            throw new Error(`OpenAI returned invalid JSON for ${toolCall.function.name}.`);
+          }
+          Sentry.logger.info('AI memory ingestion tool requested', { traceId, provider, iteration: i + 1, tool: toolCall.function.name, input });
+          const result = await executeIngestTool(toolCall.function.name, input, ctx);
+          Sentry.logger.info('AI memory ingestion tool completed', { traceId, provider, iteration: i + 1, tool: toolCall.function.name, input, result });
+          if (result.action) {
+            outcome = { action: result.action, chunkId: result.chunkId, actions: [...outcome.actions, result] };
+          }
+          toolResults.push({ role: 'tool', tool_call_id: toolCall.id, content: result.message });
+        }
+        messages.push(...toolResults);
+      } else {
+        const response = await anthropic.messages.create({
+          model,
+          max_tokens: maxTokens,
+          system,
+          tools: buildIngestTools(sourceType),
+          messages,
+        });
+
+        Sentry.logger.info('AI memory ingestion model response', { traceId, provider, model, iteration: i + 1, stopReason: response.stop_reason, responseContent: response.content, usage: response.usage });
+        messages.push({ role: 'assistant', content: response.content });
+        if (response.stop_reason !== 'tool_use') break;
+
+        const toolResults = [];
+        for (const block of response.content) {
+          if (block.type !== 'tool_use') continue;
+          Sentry.logger.info('AI memory ingestion tool requested', { traceId, provider, iteration: i + 1, tool: block.name, input: block.input });
+          const result = await executeIngestTool(block.name, block.input, ctx);
+          Sentry.logger.info('AI memory ingestion tool completed', { traceId, provider, iteration: i + 1, tool: block.name, input: block.input, result });
+          if (result.action) {
+            outcome = { action: result.action, chunkId: result.chunkId, actions: [...outcome.actions, result] };
+          }
+          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result.message });
+        }
+        messages.push({ role: 'user', content: toolResults });
+      }
+
+      // Once it's actually saved or edited, no need to keep looping.
+      if (outcome.action !== 'skipped' && !metadata?.isBatch) break;
     }
-    messages.push({ role: 'user', content: toolResults });
-
-    // Once it's actually saved or edited, no need to keep looping.
-    if (outcome.action !== 'skipped') break;
+    Sentry.logger.info('AI memory ingestion completed', { traceId, provider, model, outcome, finalMessages: messages });
+    return outcome;
+  } catch (err) {
+    Sentry.captureException(err, { tags: { pipeline: 'memory_ingest' }, extra: { traceId, orgId, projectId, sourceType, fileId, metadata: ctx.metadata, messages } });
+    throw err;
   }
-
-  return outcome;
 }
 
 module.exports = { decideAndStore };

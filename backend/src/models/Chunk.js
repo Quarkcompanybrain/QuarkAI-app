@@ -22,6 +22,9 @@ const chunkSchema = new Schema(
       senderPhoneNumber: String,
       fromMe: Boolean,
       sourceMessageId: { type: Schema.Types.ObjectId, ref: 'WhatsAppMessage' },
+      // A batch-derived fact can be supported by more than one message. The
+      // original sourceMessageId remains for backwards-compatible callers.
+      sourceMessageIds: [{ type: Schema.Types.ObjectId, ref: 'WhatsAppMessage' }],
       whatsappMessageId: String,
       messageTimestamp: Date,
     },

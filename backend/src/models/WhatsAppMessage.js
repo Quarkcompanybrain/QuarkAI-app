@@ -8,11 +8,17 @@ const projectIngestionSchema = new Schema(
   {
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true },
     sourceId: { type: Schema.Types.ObjectId, ref: 'ProjectSource', required: true },
-    status: { type: String, enum: ['pending', 'skipped', 'ingested', 'partial', 'failed'], required: true },
+    status: { type: String, enum: ['pending', 'processing', 'skipped', 'ingested', 'partial', 'failed'], required: true },
     reason: { type: String, default: null },
     memoryChunkIds: [{ type: Schema.Types.ObjectId, ref: 'Chunk' }],
     fileIds: [{ type: Schema.Types.ObjectId, ref: 'File' }],
     processedAt: { type: Date, default: null },
+    batchId: { type: String, default: null },
+    processingStartedAt: { type: Date, default: null },
+    processingExpiresAt: { type: Date, default: null },
+    nextAttemptAt: { type: Date, default: null },
+    attempts: { type: Number, default: 0 },
+    batchEligible: { type: Boolean, default: false },
   },
   { _id: false }
 );
@@ -59,5 +65,6 @@ whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, fromMe: 1, sentAt: -
 whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, senderJid: 1, sentAt: -1 });
 whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, content: 'text' });
 whatsappMessageSchema.index({ 'projectIngestions.projectId': 1 });
+whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, 'projectIngestions.projectId': 1, 'projectIngestions.status': 1, createdAt: 1 });
 
 module.exports = model('WhatsAppMessage', whatsappMessageSchema);

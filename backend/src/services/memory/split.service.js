@@ -1,3 +1,4 @@
+const Sentry = require('@sentry/node');
 const { anthropic } = require('../../config/anthropic');
 const env = require('../../config/env');
 
@@ -34,6 +35,15 @@ function fallbackChunks(handlerOutput) {
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
+}
+
+function loggableContentBlocks(content) {
+  return content.map((block) => {
+    if (block.source?.data) {
+      return { ...block, source: { ...block.source, data: `[base64 omitted; ${block.source.data.length} characters]` } };
+    }
+    return block;
+  });
 }
 
 // Models routinely wrap JSON in ```json fences despite instructions not to — strip
@@ -73,18 +83,28 @@ function parseChunkArray(rawText) {
  * ingestion, which doesn't need splitting since a message already is one
  * candidate piece).
  */
-async function splitFileIntoChunks(handlerOutput, filename) {
+async function splitFileIntoChunks(handlerOutput, filename, { traceId } = {}) {
+  const content = buildContentBlocks(handlerOutput, filename);
+  Sentry.logger.info('AI file chunking model request', { traceId, filename, system: SYSTEM_PROMPT, content: loggableContentBlocks(content) });
   const response = await anthropic.messages.create({
     model: env.anthropicChunkModel,
     max_tokens: 8192,
     system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: buildContentBlocks(handlerOutput, filename) }],
+    messages: [{ role: 'user', content }],
   });
+  Sentry.logger.info('AI file chunking model response', { traceId, filename, responseContent: response.content, usage: response.usage });
   const textBlock = response.content.find((block) => block.type === 'text');
-  if (!textBlock) return fallbackChunks(handlerOutput);
+  if (!textBlock) {
+    const fallback = fallbackChunks(handlerOutput);
+    Sentry.logger.info('AI file chunking used fallback without text response', { traceId, filename, chunks: fallback });
+    return fallback;
+  }
 
   const parsed = parseChunkArray(textBlock.text);
-  if (parsed) return parsed;
+  if (parsed) {
+    Sentry.logger.info('AI file chunking parsed response', { traceId, filename, chunks: parsed });
+    return parsed;
+  }
 
   // Native formats (PDF/image) have no raw text to paragraph-split, so a parse
   // failure here is a real error, not "nothing to extract" — surface it as one.
@@ -92,7 +112,9 @@ async function splitFileIntoChunks(handlerOutput, filename) {
     throw new Error(`Haiku returned unparseable chunk output for "${filename}".`);
   }
 
-  return fallbackChunks(handlerOutput);
+  const fallback = fallbackChunks(handlerOutput);
+  Sentry.logger.info('AI file chunking used text fallback after parse failure', { traceId, filename, chunks: fallback });
+  return fallback;
 }
 
 module.exports = { splitFileIntoChunks };

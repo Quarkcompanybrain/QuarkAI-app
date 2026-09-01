@@ -1,3 +1,5 @@
+const Sentry = require('@sentry/node');
+const { randomUUID } = require('crypto');
 const { anthropic } = require('../../config/anthropic');
 const env = require('../../config/env');
 const { embedText } = require('../embeddings/openai.service');
@@ -26,47 +28,63 @@ const GET_KNOWLEDGE_TOOL = {
  * final `sources` list.
  */
 async function streamAnswer({ history, orgId, scope, projectId, ownerId, onToken }) {
+  const traceId = randomUUID();
   const messages = [...history];
   const collectedSources = [];
+  const system = `${SYSTEM_PROMPT}\n\nCurrent server date and time: ${new Date().toISOString()} (UTC). Use this to interpret relative dates such as today, tomorrow, and last week.`;
+  Sentry.logger.info('AI chat started', { traceId, orgId, scope, projectId, ownerId, system, history });
 
-  for (let i = 0; i < 4; i++) {
-    const stream = anthropic.messages.stream({
-      model: env.anthropicChatModel,
-      max_tokens: 2048,
-      system: `${SYSTEM_PROMPT}\n\nCurrent server date and time: ${new Date().toISOString()} (UTC). Use this to interpret relative dates such as today, tomorrow, and last week.`,
-      tools: [GET_KNOWLEDGE_TOOL],
-      messages,
-    });
+  try {
+    for (let i = 0; i < 4; i++) {
+      Sentry.logger.info('AI chat model request', { traceId, iteration: i + 1, messages });
+      const stream = anthropic.messages.stream({
+        model: env.anthropicChatModel,
+        max_tokens: 2048,
+        system,
+        tools: [GET_KNOWLEDGE_TOOL],
+        messages,
+      });
 
-    stream.on('text', (delta) => onToken(delta));
+      stream.on('text', (delta) => onToken(delta));
 
-    const finalMessage = await stream.finalMessage();
-    messages.push({ role: 'assistant', content: finalMessage.content });
+      const finalMessage = await stream.finalMessage();
+      Sentry.logger.info('AI chat model response', { traceId, iteration: i + 1, stopReason: finalMessage.stop_reason, responseContent: finalMessage.content, usage: finalMessage.usage });
+      messages.push({ role: 'assistant', content: finalMessage.content });
 
-    if (finalMessage.stop_reason !== 'tool_use') {
-      const textBlock = finalMessage.content.find((block) => block.type === 'text');
-      return { text: textBlock?.text || '', sources: collectedSources };
+      if (finalMessage.stop_reason !== 'tool_use') {
+        const textBlock = finalMessage.content.find((block) => block.type === 'text');
+        const result = { text: textBlock?.text || '', sources: collectedSources };
+        Sentry.logger.info('AI chat completed', { traceId, result, finalMessages: messages });
+        return result;
+      }
+
+      const toolResults = [];
+      for (const block of finalMessage.content) {
+        if (block.type !== 'tool_use' || block.name !== 'get_knowledge') continue;
+        Sentry.logger.info('AI chat knowledge retrieval started', { traceId, iteration: i + 1, input: block.input });
+
+        const queryEmbedding = await embedText(block.input.query, { traceId, operation: 'chat_knowledge_retrieval' });
+        const results = await searchChunks({ queryEmbedding, orgId, scope, projectId, ownerId, topK: 8 });
+
+        for (const r of results) collectedSources.push({ id: r._id, filename: r.metadata?.filename, score: r.score });
+
+        const content = results.length
+          ? results.map((r, idx) => `[${idx + 1}] (from ${r.metadata?.filename || 'a message'})\n${r.text}`).join('\n\n')
+          : 'No relevant knowledge found.';
+        Sentry.logger.info('AI chat knowledge retrieval completed', { traceId, iteration: i + 1, input: block.input, results, toolResult: content });
+
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content });
+      }
+      messages.push({ role: 'user', content: toolResults });
     }
-
-    const toolResults = [];
-    for (const block of finalMessage.content) {
-      if (block.type !== 'tool_use' || block.name !== 'get_knowledge') continue;
-
-      const queryEmbedding = await embedText(block.input.query);
-      const results = await searchChunks({ queryEmbedding, orgId, scope, projectId, ownerId, topK: 8 });
-
-      for (const r of results) collectedSources.push({ id: r._id, filename: r.metadata?.filename, score: r.score });
-
-      const content = results.length
-        ? results.map((r, idx) => `[${idx + 1}] (from ${r.metadata?.filename || 'a message'})\n${r.text}`).join('\n\n')
-        : 'No relevant knowledge found.';
-
-      toolResults.push({ type: 'tool_result', tool_use_id: block.id, content });
-    }
-    messages.push({ role: 'user', content: toolResults });
+  } catch (err) {
+    Sentry.captureException(err, { tags: { pipeline: 'chat_agent' }, extra: { traceId, orgId, scope, projectId, ownerId, messages, collectedSources } });
+    throw err;
   }
 
-  return { text: '', sources: collectedSources };
+  const result = { text: '', sources: collectedSources };
+  Sentry.logger.info('AI chat stopped after iteration limit', { traceId, result, finalMessages: messages });
+  return result;
 }
 
 /**
@@ -75,6 +93,8 @@ async function streamAnswer({ history, orgId, scope, projectId, ownerId, onToken
  * instead of all reading "New chat".
  */
 async function generateChatTitle(firstMessage) {
+  const traceId = randomUUID();
+  Sentry.logger.info('AI chat title generation started', { traceId, firstMessage });
   const response = await anthropic.messages.create({
     model: env.anthropicChunkModel,
     max_tokens: 20,
@@ -85,7 +105,9 @@ async function generateChatTitle(firstMessage) {
 
   const textBlock = response.content.find((block) => block.type === 'text');
   const title = textBlock?.text?.trim().replace(/^["']|["']$/g, '');
-  return title && title.length > 0 ? title.slice(0, 80) : null;
+  const result = title && title.length > 0 ? title.slice(0, 80) : null;
+  Sentry.logger.info('AI chat title generation completed', { traceId, responseContent: response.content, usage: response.usage, result });
+  return result;
 }
 
 module.exports = { streamAnswer, generateChatTitle };

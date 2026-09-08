@@ -384,7 +384,7 @@ async function processTextBatchGroup(group, { force = false } = {}) {
   const traceId = randomUUID();
   try {
     const claimed = await claimTextBatch(group, { force });
-    if (!claimed.length) return;
+    if (!claimed?.messages?.length) return;
 
     ({ batchId, messages } = claimed);
     const [source, integration, project] = await Promise.all([

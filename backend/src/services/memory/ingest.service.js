@@ -70,7 +70,7 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
       if (useOpenAi) {
         const response = await openai.chat.completions.create({
           model,
-          max_tokens: maxTokens,
+          max_completion_tokens: maxTokens,
           messages: [{ role: 'system', content: system }, ...messages],
           tools: openAiTools(sourceType),
         });

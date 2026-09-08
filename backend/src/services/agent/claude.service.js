@@ -96,7 +96,7 @@ async function generateChatTitle(firstMessage) {
   const traceId = randomUUID();
   Sentry.logger.info('AI chat title generation started', { traceId, firstMessage });
   const response = await anthropic.messages.create({
-    model: env.anthropicChunkModel,
+    model: env.anthropicChatTitleModel,
     max_tokens: 20,
     system:
       'Generate a short title (3-6 words, no quotes, no trailing punctuation) summarizing what this chat message is asking about. Respond with ONLY the title.',

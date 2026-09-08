@@ -37,11 +37,13 @@ export function Login() {
       <h1 className="mb-1 text-center font-display text-xl font-semibold text-ink">Welcome back</h1>
       <p className="mb-6 text-center text-sm text-neutral-500">Log in to your company brain.</p>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+      <form onSubmit={handleSubmit} autoComplete="on" className="flex flex-col gap-4">
+        <Input label="Email" type="email" name="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <Input
           label="Password"
           type="password"
+          name="password"
+          autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required

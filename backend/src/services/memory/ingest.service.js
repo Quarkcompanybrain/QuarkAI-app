@@ -1,6 +1,5 @@
 const Sentry = require('@sentry/node');
 const { randomUUID } = require('crypto');
-const { anthropic } = require('../../config/anthropic');
 const { openai } = require('../../config/openai');
 const env = require('../../config/env');
 const { buildIngestTools, executeIngestTool } = require('./tools');
@@ -55,79 +54,50 @@ function openAiTools(sourceType) {
 async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, text, metadata, projectContext }) {
   const traceId = metadata?.traceId || randomUUID();
   const ctx = { orgId, projectId, ownerId, sourceType, fileId, metadata: { ...metadata, traceId } };
-  const useOpenAi = sourceType === 'whatsapp';
-  const provider = useOpenAi ? 'openai' : 'anthropic';
-  const model = useOpenAi ? env.openaiWhatsAppIngestionModel : env.anthropicChunkModel;
+  const model = env.openaiIngestionModel;
   const maxTokens = metadata?.isBatch ? 2048 : 1024;
   const messages = [{ role: 'user', content: candidateContent(text, metadata) }];
   const system = `${SYSTEM_PROMPT}${currentDateTimePrompt()}${projectContextPrompt(projectContext)}`;
   let outcome = { action: 'skipped', actions: [] };
-  Sentry.logger.info('AI memory ingestion started', { traceId, provider, model, orgId, projectId, ownerId, sourceType, fileId, metadata: ctx.metadata, projectContext, system, initialMessages: messages });
+  Sentry.logger.info('AI memory ingestion started', { traceId, provider: 'openai', model, orgId, projectId, ownerId, sourceType, fileId, metadata: ctx.metadata, projectContext, system, initialMessages: messages });
 
   try {
     for (let i = 0; i < 5; i++) {
-      Sentry.logger.info('AI memory ingestion model request', { traceId, provider, model, iteration: i + 1, messages });
-      if (useOpenAi) {
-        const response = await openai.chat.completions.create({
-          model,
-          max_completion_tokens: maxTokens,
-          messages: [{ role: 'system', content: system }, ...messages],
-          tools: openAiTools(sourceType),
-        });
-        const assistantMessage = response.choices[0]?.message;
-        if (!assistantMessage) throw new Error('OpenAI returned no ingestion message.');
-        Sentry.logger.info('AI memory ingestion model response', { traceId, provider, model, iteration: i + 1, finishReason: response.choices[0]?.finish_reason, responseContent: assistantMessage, usage: response.usage });
-        messages.push(assistantMessage);
-        if (!assistantMessage.tool_calls?.length) break;
+      Sentry.logger.info('AI memory ingestion model request', { traceId, provider: 'openai', model, iteration: i + 1, messages });
+      const response = await openai.chat.completions.create({
+        model,
+        max_completion_tokens: maxTokens,
+        messages: [{ role: 'system', content: system }, ...messages],
+        tools: openAiTools(sourceType),
+      });
+      const assistantMessage = response.choices[0]?.message;
+      if (!assistantMessage) throw new Error('OpenAI returned no ingestion message.');
+      Sentry.logger.info('AI memory ingestion model response', { traceId, provider: 'openai', model, iteration: i + 1, finishReason: response.choices[0]?.finish_reason, responseContent: assistantMessage, usage: response.usage });
+      messages.push(assistantMessage);
+      if (!assistantMessage.tool_calls?.length) break;
 
-        const toolResults = [];
-        for (const toolCall of assistantMessage.tool_calls) {
-          let input;
-          try {
-            input = JSON.parse(toolCall.function.arguments || '{}');
-          } catch {
-            throw new Error(`OpenAI returned invalid JSON for ${toolCall.function.name}.`);
-          }
-          Sentry.logger.info('AI memory ingestion tool requested', { traceId, provider, iteration: i + 1, tool: toolCall.function.name, input });
-          const result = await executeIngestTool(toolCall.function.name, input, ctx);
-          Sentry.logger.info('AI memory ingestion tool completed', { traceId, provider, iteration: i + 1, tool: toolCall.function.name, input, result });
-          if (result.action) {
-            outcome = { action: result.action, chunkId: result.chunkId, actions: [...outcome.actions, result] };
-          }
-          toolResults.push({ role: 'tool', tool_call_id: toolCall.id, content: result.message });
+      const toolResults = [];
+      for (const toolCall of assistantMessage.tool_calls) {
+        let input;
+        try {
+          input = JSON.parse(toolCall.function.arguments || '{}');
+        } catch {
+          throw new Error(`OpenAI returned invalid JSON for ${toolCall.function.name}.`);
         }
-        messages.push(...toolResults);
-      } else {
-        const response = await anthropic.messages.create({
-          model,
-          max_tokens: maxTokens,
-          system,
-          tools: buildIngestTools(sourceType),
-          messages,
-        });
-
-        Sentry.logger.info('AI memory ingestion model response', { traceId, provider, model, iteration: i + 1, stopReason: response.stop_reason, responseContent: response.content, usage: response.usage });
-        messages.push({ role: 'assistant', content: response.content });
-        if (response.stop_reason !== 'tool_use') break;
-
-        const toolResults = [];
-        for (const block of response.content) {
-          if (block.type !== 'tool_use') continue;
-          Sentry.logger.info('AI memory ingestion tool requested', { traceId, provider, iteration: i + 1, tool: block.name, input: block.input });
-          const result = await executeIngestTool(block.name, block.input, ctx);
-          Sentry.logger.info('AI memory ingestion tool completed', { traceId, provider, iteration: i + 1, tool: block.name, input: block.input, result });
-          if (result.action) {
-            outcome = { action: result.action, chunkId: result.chunkId, actions: [...outcome.actions, result] };
-          }
-          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result.message });
+        Sentry.logger.info('AI memory ingestion tool requested', { traceId, provider: 'openai', iteration: i + 1, tool: toolCall.function.name, input });
+        const result = await executeIngestTool(toolCall.function.name, input, ctx);
+        Sentry.logger.info('AI memory ingestion tool completed', { traceId, provider: 'openai', iteration: i + 1, tool: toolCall.function.name, input, result });
+        if (result.action) {
+          outcome = { action: result.action, chunkId: result.chunkId, actions: [...outcome.actions, result] };
         }
-        messages.push({ role: 'user', content: toolResults });
+        toolResults.push({ role: 'tool', tool_call_id: toolCall.id, content: result.message });
       }
+      messages.push(...toolResults);
 
       // Once it's actually saved or edited, no need to keep looping.
       if (outcome.action !== 'skipped' && !metadata?.isBatch) break;
     }
-    Sentry.logger.info('AI memory ingestion completed', { traceId, provider, model, outcome, finalMessages: messages });
+    Sentry.logger.info('AI memory ingestion completed', { traceId, provider: 'openai', model, outcome, finalMessages: messages });
     return outcome;
   } catch (err) {
     Sentry.captureException(err, { tags: { pipeline: 'memory_ingest' }, extra: { traceId, orgId, projectId, sourceType, fileId, metadata: ctx.metadata, messages } });

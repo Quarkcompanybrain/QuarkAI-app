@@ -60,7 +60,7 @@ export function ForgotPassword() {
               <h1 className="mb-1 text-center font-display text-xl font-semibold text-ink">Reset your password</h1>
               <p className="mb-6 text-center text-sm text-neutral-500">We'll email you a code to reset it.</p>
               <form onSubmit={handleRequestOtp} className="flex flex-col gap-4">
-                <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <Input label="Email" type="email" name="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
                 <ErrorBanner message={error} />
                 <Button type="submit" loading={loading} className="mt-1 w-full">
                   Send reset code
@@ -72,10 +72,12 @@ export function ForgotPassword() {
               <h1 className="mb-1 text-center font-display text-xl font-semibold text-ink">Check your email</h1>
               <p className="mb-6 text-center text-sm text-neutral-500">Enter the code sent to {email} and choose a new password.</p>
               <form onSubmit={handleReset} className="flex flex-col gap-4">
-                <Input label="Reset code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} required />
+                <Input label="Reset code" name="resetCode" autoComplete="one-time-code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} required />
                 <Input
                   label="New password"
                   type="password"
+                  name="newPassword"
+                  autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required

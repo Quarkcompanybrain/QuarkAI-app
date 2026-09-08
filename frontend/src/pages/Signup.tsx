@@ -71,7 +71,7 @@ export function Signup() {
               <h1 className="mb-1 text-center font-display text-xl font-semibold text-ink">Create your account</h1>
               <p className="mb-6 text-center text-sm text-neutral-500">We'll email you a verification code.</p>
               <form onSubmit={handleRequestOtp} className="flex flex-col gap-4">
-                <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <Input label="Email" type="email" name="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
                 <ErrorBanner message={error} />
                 <Button type="submit" loading={loading} className="mt-1 w-full">
                   Send code
@@ -92,15 +92,19 @@ export function Signup() {
               <form onSubmit={handleVerify} className="flex flex-col gap-4">
                 <Input
                   label="Verification code"
+                  name="verificationCode"
+                  autoComplete="one-time-code"
                   inputMode="numeric"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   required
                 />
-                <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+                <Input label="Name" name="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} required />
                 <Input
                   label="Password"
                   type="password"
+                  name="password"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required

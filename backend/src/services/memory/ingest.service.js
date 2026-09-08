@@ -52,12 +52,12 @@ function openAiTools(sourceType) {
   }));
 }
 
-async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, text, metadata, projectContext }) {
+async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, text, metadata, projectContext, useOpenAi, openAiModel }) {
   const traceId = metadata?.traceId || randomUUID();
   const ctx = { orgId, projectId, ownerId, sourceType, fileId, metadata: { ...metadata, traceId } };
-  const useOpenAi = sourceType === 'whatsapp';
-  const provider = useOpenAi ? 'openai' : 'anthropic';
-  const model = useOpenAi ? env.openaiWhatsAppIngestionModel : env.anthropicChunkModel;
+  const shouldUseOpenAi = useOpenAi ?? sourceType === 'whatsapp';
+  const provider = shouldUseOpenAi ? 'openai' : 'anthropic';
+  const model = shouldUseOpenAi ? (openAiModel || env.openaiWhatsAppIngestionModel) : env.anthropicChunkModel;
   const maxTokens = metadata?.isBatch ? 2048 : 1024;
   const messages = [{ role: 'user', content: candidateContent(text, metadata) }];
   const system = `${SYSTEM_PROMPT}${currentDateTimePrompt()}${projectContextPrompt(projectContext)}`;
@@ -67,7 +67,7 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
   try {
     for (let i = 0; i < 5; i++) {
       Sentry.logger.info('AI memory ingestion model request', { traceId, provider, model, iteration: i + 1, messages });
-      if (useOpenAi) {
+      if (shouldUseOpenAi) {
         const response = await openai.chat.completions.create({
           model,
           max_completion_tokens: maxTokens,

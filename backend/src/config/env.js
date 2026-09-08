@@ -34,6 +34,7 @@ module.exports = {
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
   openaiWhatsAppIngestionModel: process.env.OPENAI_WHATSAPP_INGESTION_MODEL || 'gpt-5.4-nano',
+  openaiFileIngestionModel: process.env.OPENAI_FILE_INGESTION_MODEL || 'gpt-5.4-nano',
   whatsappIngestionBatchWindowMs: Number(process.env.WHATSAPP_INGESTION_BATCH_WINDOW_MS) || 300_000,
   whatsappIngestionBatchMaxMessages: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_MESSAGES) || 30,
   whatsappIngestionBatchMaxChars: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_CHARS) || 12_000,

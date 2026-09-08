@@ -62,10 +62,12 @@ export function AcceptInvite() {
           <form onSubmit={handleAccept} className="flex flex-col gap-4">
             {invite.requiresPassword && (
               <>
-                <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+                <Input label="Name" name="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} required />
                 <Input
                   label="Password"
                   type="password"
+                  name="password"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required

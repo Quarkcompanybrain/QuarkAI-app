@@ -1,5 +1,4 @@
 const Sentry = require('@sentry/node');
-const { anthropic } = require('../../config/anthropic');
 const { openai } = require('../../config/openai');
 const env = require('../../config/env');
 
@@ -9,43 +8,6 @@ Rules:
 - Preserve important context (headers, labels) inside the chunk it belongs to so it makes sense in isolation.
 - Skip pure boilerplate (page numbers, repeated headers/footers) but keep everything substantive.
 - Respond with ONLY a JSON array of strings, one string per chunk. No prose, no markdown fences, no explanation.`;
-
-function buildContentBlocks(handlerOutput, filename) {
-  if (handlerOutput.kind === 'file') {
-    const blockType = handlerOutput.mediaType.startsWith('image/') ? 'image' : 'document';
-    return [
-      {
-        type: blockType,
-        source: { type: 'base64', media_type: handlerOutput.mediaType, data: handlerOutput.base64 },
-      },
-      { type: 'text', text: `Split "${filename}" into semantic chunks per the system instructions.` },
-    ];
-  }
-
-  return [
-    {
-      type: 'text',
-      text: `Document "${filename}":\n\n${handlerOutput.text}\n\nSplit the document above into semantic chunks per the system instructions.`,
-    },
-  ];
-}
-
-function fallbackChunks(handlerOutput) {
-  if (handlerOutput.kind !== 'text') return [];
-  return handlerOutput.text
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-}
-
-function loggableContentBlocks(content) {
-  return content.map((block) => {
-    if (block.source?.data) {
-      return { ...block, source: { ...block.source, data: `[base64 omitted; ${block.source.data.length} characters]` } };
-    }
-    return block;
-  });
-}
 
 function buildOpenAiContent(handlerOutput, filename) {
   const instruction = `Split "${filename}" into semantic chunks per the system instructions.`;
@@ -72,7 +34,7 @@ function buildOpenAiContent(handlerOutput, filename) {
   }];
 }
 
-function loggableOpenAiContent(content) {
+function loggableContent(content) {
   return content.map((block) => {
     if (block.image_url?.startsWith('data:')) {
       return { ...block, image_url: `[base64 image omitted; ${block.image_url.length} characters]` };
@@ -84,34 +46,16 @@ function loggableOpenAiContent(content) {
   });
 }
 
-// Models routinely wrap JSON in ```json fences despite instructions not to — strip
-// them before parsing, and fall back to grabbing the outermost [...] if that's not enough.
 function parseChunkArray(rawText) {
   const stripped = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-
   try {
     const parsed = JSON.parse(stripped);
-    if (Array.isArray(parsed) && parsed.every((c) => typeof c === 'string')) {
-      return parsed.filter((c) => c.trim().length > 0);
-    }
+    return Array.isArray(parsed) && parsed.every((chunk) => typeof chunk === 'string')
+      ? parsed.filter((chunk) => chunk.trim().length > 0)
+      : null;
   } catch {
-    // fall through
+    return null;
   }
-
-  const firstBracket = stripped.indexOf('[');
-  const lastBracket = stripped.lastIndexOf(']');
-  if (firstBracket !== -1 && lastBracket > firstBracket) {
-    try {
-      const parsed = JSON.parse(stripped.slice(firstBracket, lastBracket + 1));
-      if (Array.isArray(parsed) && parsed.every((c) => typeof c === 'string')) {
-        return parsed.filter((c) => c.trim().length > 0);
-      }
-    } catch {
-      // fall through
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -121,62 +65,32 @@ function parseChunkArray(rawText) {
  * ingestion, which doesn't need splitting since a message already is one
  * candidate piece).
  */
-async function splitFileIntoChunks(handlerOutput, filename, { traceId, useOpenAi = false, openAiModel } = {}) {
-  const provider = useOpenAi ? 'openai' : 'anthropic';
-  const model = useOpenAi ? (openAiModel || env.openaiFileIngestionModel) : env.anthropicChunkModel;
-  const content = useOpenAi ? buildOpenAiContent(handlerOutput, filename) : buildContentBlocks(handlerOutput, filename);
+async function splitFileIntoChunks(handlerOutput, filename, { traceId } = {}) {
+  const model = env.openaiIngestionModel;
+  const content = buildOpenAiContent(handlerOutput, filename);
   Sentry.logger.info('AI file chunking model request', {
     traceId,
-    provider,
+    provider: 'openai',
     model,
     filename,
     system: SYSTEM_PROMPT,
-    content: useOpenAi ? loggableOpenAiContent(content) : loggableContentBlocks(content),
+    content: loggableContent(content),
   });
 
-  let rawText;
-  let usage;
-  if (useOpenAi) {
-    const response = await openai.responses.create({
-      model,
-      instructions: SYSTEM_PROMPT,
-      max_output_tokens: 8192,
-      input: [{ role: 'user', content }],
-    });
-    rawText = response.output_text;
-    usage = response.usage;
-  } else {
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content }],
-    });
-    rawText = response.content.find((block) => block.type === 'text')?.text;
-    usage = response.usage;
-  }
-  Sentry.logger.info('AI file chunking model response', { traceId, provider, model, filename, rawText, usage });
-  if (!rawText) {
-    const fallback = fallbackChunks(handlerOutput);
-    Sentry.logger.info('AI file chunking used fallback without text response', { traceId, filename, chunks: fallback });
-    return fallback;
-  }
+  const response = await openai.responses.create({
+    model,
+    instructions: SYSTEM_PROMPT,
+    max_output_tokens: 8192,
+    input: [{ role: 'user', content }],
+  });
+  const rawText = response.output_text;
+  Sentry.logger.info('AI file chunking model response', { traceId, provider: 'openai', model, filename, rawText, usage: response.usage });
+  if (!rawText) throw new Error(`OpenAI returned no chunk output for "${filename}".`);
 
   const parsed = parseChunkArray(rawText);
-  if (parsed) {
-    Sentry.logger.info('AI file chunking parsed response', { traceId, filename, chunks: parsed });
-    return parsed;
-  }
-
-  // Native formats (PDF/image) have no raw text to paragraph-split, so a parse
-  // failure here is a real error, not "nothing to extract" — surface it as one.
-  if (handlerOutput.kind === 'file') {
-    throw new Error(`${useOpenAi ? 'GPT-5.4 nano' : 'Haiku'} returned unparseable chunk output for "${filename}".`);
-  }
-
-  const fallback = fallbackChunks(handlerOutput);
-  Sentry.logger.info('AI file chunking used text fallback after parse failure', { traceId, filename, chunks: fallback });
-  return fallback;
+  if (!parsed) throw new Error(`OpenAI returned unparseable chunk output for "${filename}".`);
+  Sentry.logger.info('AI file chunking parsed response', { traceId, filename, chunks: parsed });
+  return parsed;
 }
 
 module.exports = { splitFileIntoChunks };

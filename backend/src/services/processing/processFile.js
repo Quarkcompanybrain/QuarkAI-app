@@ -2,7 +2,6 @@ const Sentry = require('@sentry/node');
 const { randomUUID } = require('crypto');
 const File = require('../../models/File');
 const Project = require('../../models/Project');
-const env = require('../../config/env');
 const { getObjectBuffer } = require('../storage/s3.service');
 const { resolveHandler } = require('../file_handlers/registry');
 const { splitFileIntoChunks } = require('../memory/split.service');
@@ -39,12 +38,7 @@ async function processFile(fileId, { traceId = randomUUID() } = {}) {
         : handlerOutput,
     });
 
-    const useOpenAi = file.sourceType === 'upload';
-    const candidateChunks = await splitFileIntoChunks(handlerOutput, file.filename, {
-      traceId,
-      useOpenAi,
-      openAiModel: env.openaiFileIngestionModel,
-    });
+    const candidateChunks = await splitFileIntoChunks(handlerOutput, file.filename, { traceId });
     if (candidateChunks.length === 0) throw new Error('No extractable content found in this file.');
     Sentry.logger.info('File AI processing split candidates', { traceId, fileId: String(file._id), candidateChunks });
 
@@ -59,8 +53,6 @@ async function processFile(fileId, { traceId = randomUUID() } = {}) {
         projectId: file.projectId,
         ownerId: file.ownerId,
         sourceType: file.sourceType === 'whatsapp' ? 'whatsapp' : 'file',
-        useOpenAi,
-        openAiModel: env.openaiFileIngestionModel,
         fileId: file._id,
         text,
         metadata: {

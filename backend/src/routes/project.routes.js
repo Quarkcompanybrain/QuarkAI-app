@@ -3,14 +3,16 @@ const ctrl = require('../controllers/project.controller');
 const sourceCtrl = require('../controllers/projectSource.controller');
 const chunkCtrl = require('../controllers/chunk.controller');
 const { requireAuth } = require('../middleware/auth');
-const { requireOrgContext } = require('../middleware/activeOrg');
+const { requireOrgContext, requireOrgAdmin } = require('../middleware/activeOrg');
 const { requireProjectMember, requireProjectAdmin } = require('../middleware/scoping');
 
 const router = Router();
 
 router.use(requireAuth, requireOrgContext);
 
-router.post('/', ctrl.createProject);
+// Only org admins create projects, so admins are members of every project
+// they create and the daily brief never leaks a project to an outsider.
+router.post('/', requireOrgAdmin, ctrl.createProject);
 router.get('/', ctrl.listMyProjects);
 router.get('/:projectId', requireProjectMember, ctrl.getProject);
 router.patch('/:projectId', requireProjectMember, ctrl.updateProject);

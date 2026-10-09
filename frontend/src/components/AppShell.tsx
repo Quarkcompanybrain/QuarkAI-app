@@ -192,7 +192,7 @@ function SidebarBody({
       <nav className="flex flex-col gap-0.5">
         <div className="flex items-center justify-between px-3">
           <span className="text-xs font-medium uppercase tracking-wide text-neutral-400">Projects</span>
-          <NewProjectButton />
+          {activeOrg?.role === 'admin' && <NewProjectButton />}
         </div>
 
         {projects.length === 0 && <p className="px-3 py-1 text-xs text-neutral-400">No projects yet.</p>}

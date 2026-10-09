@@ -329,18 +329,7 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
         const chatLists = await Promise.all(connected.map((i) => integrationsApi.listChats(i.id)));
         const byIntegration: Record<string, WhatsAppChat[]> = {};
         connected.forEach((integration, i) => {
-          const chats = chatLists[i].chats;
-          // Keep a previously selected source removable even if its old cache
-          // row used an internal LID that is no longer shown in the picker.
-          const missingSelectedSources = sourcesRes.sources
-            .filter((source) => source.sourceType === 'whatsapp' && source.integrationId === integration.id && !chats.some((chat) => chat.jid === source.chatJid))
-            .map((source) => ({
-              jid: source.chatJid as string,
-              name: source.chatName || source.chatJid || '',
-              isGroup: source.isGroup,
-              lastMessageAt: null,
-            }));
-          byIntegration[integration.id] = [...missingSelectedSources, ...chats];
+          byIntegration[integration.id] = chatLists[i].chats;
         });
         setChatsByIntegration(byIntegration);
       })

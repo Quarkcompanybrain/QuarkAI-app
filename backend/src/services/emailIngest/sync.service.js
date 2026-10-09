@@ -9,7 +9,7 @@ const EmailMessage = require('../../models/EmailMessage');
 const { uploadBuffer } = require('../storage/s3.service');
 const { SUPPORTED_MIME_TYPES } = require('../file_handlers/registry');
 const { decryptJson } = require('../../utils/crypto');
-const { createClient, discoverFolders, friendlyImapError } = require('./imap');
+const { createClient, friendlyImapError } = require('./imap');
 const { processDueEmails } = require('./ingest.service');
 const env = require('../../config/env');
 
@@ -190,7 +190,7 @@ async function syncFolder({ client, integration, folder, sources, traceId }) {
 
   // A reset folder or a mailbox with no linked project only moves its cursor
   // to "now", so linking a project later never backfills old mail.
-  if (folder.uidValidity !== uidValidity || folder.lastUid == null || sources.length === 0) {
+  if (folder.uidValidity !== uidValidity || sources.length === 0) {
     if (folder.uidValidity !== uidValidity || folder.lastUid !== end) {
       Object.assign(folder, { uidValidity, lastUid: end });
       await saveCursor(integration._id, folder);
@@ -257,12 +257,8 @@ async function syncIntegration(integrationId) {
     client.on('error', (err) => Sentry.logger.info('IMAP connection error', { traceId, integrationId: String(integrationId), error: err.message }));
     await client.connect();
     try {
-      if (!integration.email.folders.length) {
-        update['email.folders'] = await discoverFolders(client);
-      } else {
-        for (const folder of integration.email.folders.map((entry) => entry.toObject())) {
-          stored += await syncFolder({ client, integration, folder, sources, traceId });
-        }
+      for (const folder of integration.email.folders.map((entry) => entry.toObject())) {
+        stored += await syncFolder({ client, integration, folder, sources, traceId });
       }
     } finally {
       await client.logout().catch(() => client.close());

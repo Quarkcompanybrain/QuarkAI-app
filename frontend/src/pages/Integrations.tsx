@@ -178,6 +178,8 @@ export function Integrations() {
   );
 }
 
+const MAX_MAILBOXES = 5;
+
 function EmailCard({
   mailboxes,
   onChanged,
@@ -244,7 +246,7 @@ function EmailCard({
       </div>
 
       <p className="mt-3 text-sm text-neutral-500">
-        Learn from new mail in your inbox and sent folder. Connect as many mailboxes as you like, then choose which
+        Learn from new mail in your inbox and sent folder. Connect up to {MAX_MAILBOXES} mailboxes, then choose which
         projects each one feeds in project settings.
       </p>
 
@@ -325,6 +327,10 @@ function EmailCard({
             </Button>
           </div>
         </form>
+      ) : mailboxes.length >= MAX_MAILBOXES ? (
+        <p className="mt-4 text-xs text-neutral-500">
+          {MAX_MAILBOXES} of {MAX_MAILBOXES} mailboxes connected. Disconnect one to add another.
+        </p>
       ) : (
         <Button onClick={() => setFormOpen(true)} className="mt-4 w-full gap-1.5">
           <PlugIcon className="h-3.5 w-3.5" />

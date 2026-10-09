@@ -3,7 +3,7 @@ const { softDeletePlugin } = require('../utils/softDeletePlugin');
 
 // One per user per connected account — WhatsApp (via Baileys) and email
 // (via IMAP) are personal, not org-wide, so this is deliberately not scoped
-// to an org. A user has at most one WhatsApp account but any number of
+// to an org. A user has at most one WhatsApp account and up to five
 // mailboxes. Projects pick which of a user's chats or mailboxes feed them
 // (see ProjectSource).
 const emailFolderSchema = new Schema(

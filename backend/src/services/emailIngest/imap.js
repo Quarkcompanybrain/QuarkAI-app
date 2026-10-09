@@ -185,4 +185,4 @@ async function inspectMailbox(server, credentials) {
   }
 }
 
-module.exports = { resolveImapServer, createClient, discoverFolders, inspectMailbox, friendlyImapError };
+module.exports = { resolveImapServer, createClient, inspectMailbox, friendlyImapError };

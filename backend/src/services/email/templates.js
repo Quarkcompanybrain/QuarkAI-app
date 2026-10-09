@@ -166,7 +166,7 @@ function dailyReportEmail({ orgName, reportDateLabel, appUrl, stats, executive, 
           <tr>
             ${reportStat(stats.activeProjectCount, 'active projects')}
             ${reportStat(stats.newMemoryCount + stats.updatedMemoryCount, 'memories captured')}
-            ${reportStat(stats.whatsappMessageCount + (stats.emailCount || 0), 'messages')}
+            ${reportStat(stats.whatsappMessageCount + stats.emailCount, 'messages')}
             ${reportStat(stats.fileCount, 'files')}
           </tr>
         </table>

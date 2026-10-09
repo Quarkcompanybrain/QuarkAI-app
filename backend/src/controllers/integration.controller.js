@@ -78,9 +78,10 @@ const streamStatus = asyncHandler(async (req, res) => {
 });
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_MAILBOXES_PER_USER = 5;
 
-// A user can connect any number of mailboxes. Credentials are verified with a
-// real IMAP sign-in before anything is stored, then kept encrypted at rest.
+// A user can connect up to MAX_MAILBOXES_PER_USER mailboxes. Credentials are verified
+// with a real IMAP sign-in before anything is stored, then kept encrypted at rest.
 const connectEmail = asyncHandler(async (req, res) => {
   const emailAddress = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
@@ -89,6 +90,10 @@ const connectEmail = asyncHandler(async (req, res) => {
 
   const existing = await Integration.findOne({ userId: req.user.id, type: 'email', emailAddress });
   if (existing) throw new ApiError(409, 'This mailbox is already connected.');
+  const mailboxCount = await Integration.countDocuments({ userId: req.user.id, type: 'email' });
+  if (mailboxCount >= MAX_MAILBOXES_PER_USER) {
+    throw new ApiError(409, `You can connect up to ${MAX_MAILBOXES_PER_USER} mailboxes. Disconnect one to add another.`);
+  }
 
   const server = await resolveImapServer(emailAddress, { host: req.body.host, port: req.body.port, secure: req.body.secure });
   // Some providers sign in with a username that isn't the address.

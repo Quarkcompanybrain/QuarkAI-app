@@ -38,6 +38,8 @@ module.exports = {
   whatsappIngestionBatchWindowMs: Number(process.env.WHATSAPP_INGESTION_BATCH_WINDOW_MS) || 300_000,
   whatsappIngestionBatchMaxMessages: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_MESSAGES) || 30,
   whatsappIngestionBatchMaxChars: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_CHARS) || 12_000,
+  emailSyncPollMs: Number(process.env.EMAIL_SYNC_POLL_MS) || 120_000,
+  emailIngestionPollMs: Number(process.env.EMAIL_INGESTION_POLL_MS) || 15_000,
   whatsappIngestionBatchPollMs: Number(process.env.WHATSAPP_INGESTION_BATCH_POLL_MS) || 15_000,
 
   // Daily brief emailed to org admins. Sent once per org per local date, at or

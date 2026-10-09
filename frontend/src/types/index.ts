@@ -60,10 +60,13 @@ export type IntegrationStatus = 'pending' | 'connected' | 'disconnected' | 'fail
 
 export interface Integration {
   id: string;
-  type: 'whatsapp';
+  type: 'whatsapp' | 'email';
   status: IntegrationStatus;
   phoneNumber: string | null;
+  emailAddress?: string | null;
   lastConnectedAt: string | null;
+  lastSyncedAt?: string | null;
+  lastError?: string | null;
 }
 
 export interface WhatsAppChat {
@@ -84,9 +87,9 @@ export interface WhatsAppChat {
 
 export interface ProjectSource {
   id: string;
-  sourceType: 'whatsapp';
+  sourceType: 'whatsapp' | 'email';
   integrationId: string;
-  chatJid: string;
+  chatJid: string | null;
   chatName: string;
   isGroup: boolean;
   addedBy: string;

@@ -6,6 +6,9 @@ export const integrationsApi = {
 
   connectWhatsapp: () => api.post<{ integration: Integration }>('/integrations/whatsapp/connect'),
 
+  connectEmail: (values: { email: string; password: string; host?: string; port?: number; username?: string }) =>
+    api.post<{ integration: Integration }>('/integrations/email/connect', values),
+
   disconnect: (id: string) => api.delete<{ message: string }>(`/integrations/${id}`),
 
   listChats: (id: string) => api.get<{ chats: WhatsAppChat[] }>(`/integrations/${id}/chats`),

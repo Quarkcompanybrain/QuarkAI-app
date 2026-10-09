@@ -119,6 +119,7 @@ function projectMetricsLine(metrics) {
   if (metrics.newMemories) parts.push(`${metrics.newMemories} new ${metrics.newMemories === 1 ? 'memory' : 'memories'}`);
   if (metrics.updatedMemories) parts.push(`${metrics.updatedMemories} updated`);
   if (metrics.whatsappMessages) parts.push(plural(metrics.whatsappMessages, 'WhatsApp message'));
+  if (metrics.emails) parts.push(plural(metrics.emails, 'email'));
   if (metrics.files) parts.push(plural(metrics.files, 'file'));
   if (metrics.failedFiles) parts.push(`${metrics.failedFiles} failed to process`);
   if (metrics.chatQuestions) parts.push(plural(metrics.chatQuestions, 'chat question'));
@@ -165,7 +166,7 @@ function dailyReportEmail({ orgName, reportDateLabel, appUrl, stats, executive, 
           <tr>
             ${reportStat(stats.activeProjectCount, 'active projects')}
             ${reportStat(stats.newMemoryCount + stats.updatedMemoryCount, 'memories captured')}
-            ${reportStat(stats.whatsappMessageCount, 'messages')}
+            ${reportStat(stats.whatsappMessageCount + (stats.emailCount || 0), 'messages')}
             ${reportStat(stats.fileCount, 'files')}
           </tr>
         </table>

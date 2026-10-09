@@ -22,6 +22,7 @@ const dailyReportSchema = new Schema(
       updatedMemoryCount: { type: Number, default: 0 },
       fileCount: { type: Number, default: 0 },
       whatsappMessageCount: { type: Number, default: 0 },
+      emailCount: { type: Number, default: 0 },
     },
   },
   { timestamps: true }

@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { integrationsApi, streamIntegrationStatus } from '../features/integrations/api';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { ErrorBanner } from '../components/ErrorBanner';
+import { ApiRequestError } from '../lib/api';
 import { PulseNode } from '../components/PulseNode';
 import { InfoIcon, MailIcon, PlugIcon } from '../components/icons';
 import { FaWhatsapp } from 'react-icons/fa';
@@ -52,6 +55,8 @@ export function Integrations() {
   const [connectError, setConnectError] = useState<string | null>(null);
 
   const refresh = () => integrationsApi.list().then((r) => setIntegrations(r.integrations));
+  const whatsappIntegrations = integrations.filter((i) => i.type === 'whatsapp');
+  const emailIntegrations = integrations.filter((i) => i.type === 'email');
 
   useEffect(() => {
     refresh();
@@ -112,7 +117,7 @@ export function Integrations() {
 
           <p className="mt-3 text-sm text-neutral-500">Learn from your groups and chats in real time.</p>
 
-          {integrations.length === 0 && (
+          {whatsappIntegrations.length === 0 && (
             <Button onClick={handleConnect} loading={connecting} className="mt-4 w-full gap-1.5">
               <PlugIcon className="h-3.5 w-3.5" />
               Connect account
@@ -147,9 +152,9 @@ export function Integrations() {
             )}
           </AnimatePresence>
 
-          {integrations.length > 0 && (
+          {whatsappIntegrations.length > 0 && (
             <ul className="mt-4 flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
-              {integrations.map((i) => (
+              {whatsappIntegrations.map((i) => (
                 <li key={i.id} className="flex items-center justify-between px-4 py-3.5">
                   <div>
                     <p className="text-sm font-medium text-ink">{i.phoneNumber || 'Connecting…'}</p>
@@ -167,16 +172,165 @@ export function Integrations() {
           )}
         </Card>
 
-        <Card className="opacity-60">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500">
-              <MailIcon className="h-5 w-5" />
-            </div>
-            <h2 className="font-display text-base font-semibold text-ink">Email</h2>
-          </div>
-          <p className="mt-3 text-sm text-neutral-500">Coming soon.</p>
-        </Card>
+        <EmailCard mailboxes={emailIntegrations} onChanged={refresh} onDisconnect={handleDisconnect} />
       </div>
     </div>
+  );
+}
+
+function EmailCard({
+  mailboxes,
+  onChanged,
+  onDisconnect,
+}: {
+  mailboxes: Integration[];
+  onChanged: () => void;
+  onDisconnect: (id: string) => Promise<void>;
+}) {
+  const [formOpen, setFormOpen] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('993');
+  const [username, setUsername] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const resetForm = () => {
+    setEmail('');
+    setPassword('');
+    setHost('');
+    setPort('993');
+    setUsername('');
+    setShowAdvanced(false);
+    setError(null);
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await integrationsApi.connectEmail({
+        email: email.trim(),
+        password,
+        ...(host.trim() ? { host: host.trim(), port: Number(port) || 993 } : {}),
+        ...(username.trim() ? { username: username.trim() } : {}),
+      });
+      resetForm();
+      setFormOpen(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : 'Could not connect this mailbox. Try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-magenta-50 text-magenta-600">
+          <MailIcon className="h-5 w-5" />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <h2 className="font-display text-base font-semibold text-ink">Email</h2>
+          <InfoTooltip>
+            Connects over IMAP and only reads mail; nothing is sent or marked as read. For Gmail and Google Workspace,
+            turn on 2-Step Verification and create an app password. Outlook and Microsoft 365 aren't supported yet.
+          </InfoTooltip>
+        </div>
+      </div>
+
+      <p className="mt-3 text-sm text-neutral-500">
+        Learn from new mail in your inbox and sent folder. Connect as many mailboxes as you like, then choose which
+        projects each one feeds in project settings.
+      </p>
+
+      {mailboxes.length > 0 && (
+        <ul className="mt-4 flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
+          {mailboxes.map((mailbox) => (
+            <li key={mailbox.id} className="flex items-center justify-between gap-3 px-4 py-3.5">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-ink">{mailbox.emailAddress}</p>
+                <p className={`text-xs ${mailbox.status === 'failed' ? 'text-magenta-600' : 'text-neutral-500'}`}>
+                  {mailbox.status === 'failed'
+                    ? mailbox.lastError || 'Sign-in failed. Disconnect and connect again.'
+                    : mailbox.lastSyncedAt
+                      ? `Checked ${new Date(mailbox.lastSyncedAt).toLocaleString()}`
+                      : 'Connected'}
+                </p>
+              </div>
+              <button
+                onClick={() => onDisconnect(mailbox.id)}
+                className="shrink-0 text-xs font-medium text-neutral-500 transition-colors hover:text-magenta-500"
+              >
+                Disconnect
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {formOpen ? (
+        <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3 rounded-xl border border-neutral-150 bg-neutral-25 p-4">
+          <ErrorBanner message={error} />
+          <Input label="Email address" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" required />
+          <Input
+            label="App password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+            required
+          />
+          <p className="-mt-1 text-xs text-neutral-500">
+            Gmail:{' '}
+            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="font-medium text-magenta-600 hover:underline">
+              create an app password
+            </a>
+            . Other providers: your mailbox password, or an app password if 2-step sign-in is on.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((open) => !open)}
+            className="self-start text-xs font-medium text-neutral-500 hover:text-magenta-600"
+          >
+            {showAdvanced ? 'Hide advanced settings' : 'Advanced settings'}
+          </button>
+          {showAdvanced && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-neutral-500">Only needed if we can't detect your provider's IMAP server.</p>
+              <div className="grid grid-cols-[1fr_88px] gap-3">
+                <Input label="IMAP server" placeholder="imap.example.com" value={host} onChange={(e) => setHost(e.target.value)} autoComplete="off" />
+                <Input label="Port" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value)} autoComplete="off" />
+              </div>
+              <Input label="Username (if not the email address)" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button type="submit" loading={submitting} className="flex-1">
+              Connect mailbox
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                resetForm();
+                setFormOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <Button onClick={() => setFormOpen(true)} className="mt-4 w-full gap-1.5">
+          <PlugIcon className="h-3.5 w-3.5" />
+          {mailboxes.length ? 'Connect another mailbox' : 'Connect mailbox'}
+        </Button>
+      )}
+    </Card>
   );
 }

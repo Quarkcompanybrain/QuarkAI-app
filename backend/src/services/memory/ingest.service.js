@@ -4,13 +4,14 @@ const { openai } = require('../../config/openai');
 const env = require('../../config/env');
 const { buildIngestTools, executeIngestTool } = require('./tools');
 
-const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document, a single chat message, or a chronological batch of WhatsApp messages. Decide what to do with it:
+const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document, a single chat message, a chronological batch of WhatsApp messages, or one email. Decide what to do with it:
 
 1. Call search_memory first to check whether related or contradicting information is already stored.
 2. For a potentially useful WhatsApp message that depends on earlier discussion, call get_whatsapp_chat_context before deciding. Select focused query parameters (sender, direction, time range, type, reply, mention, text, or ingestion state) based on what you need to resolve. It only searches the same chat. Use it to resolve references, decisions, and updates; do not save a fragment that loses its meaning without that context.
 3. If this is new information worth remembering (a fact, decision, update, instruction, or detail someone might later search for), call save_memory with a self-contained version of it — rephrase only as needed for it to make sense on its own, keeping the original wording and context as much as possible. For a WhatsApp batch, include the recordId of every supporting message in sourceMessageIds, and combine messages only when they establish one coherent fact.
 4. If it updates or corrects something search_memory found, call edit_memory on that entry instead of creating a duplicate. For a WhatsApp batch, include the supporting recordIds in sourceMessageIds.
-5. If it has no lasting informational value (greetings, small talk, acknowledgements, emoji reactions, or something already fully captured), don't call save_memory or edit_memory at all — you're done.
+5. For an email, save only its new content; any earlier thread messages shown are context and were already evaluated.
+6. If it has no lasting informational value (greetings, small talk, acknowledgements, emoji reactions, or something already fully captured), don't call save_memory or edit_memory at all — you're done.
 
 Respond only with tool calls, no commentary.`;
 
@@ -32,7 +33,7 @@ function currentDateTimePrompt() {
 }
 
 function candidateContent(text, metadata) {
-  if (metadata?.isBatch) return text;
+  if (metadata?.isBatch || metadata?.isEmail) return text;
   if (!metadata?.sourceMessageId) return text;
 
   const sentAt = metadata.messageTimestamp ? new Date(metadata.messageTimestamp).toISOString() : 'unknown';
@@ -55,7 +56,7 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
   const traceId = metadata?.traceId || randomUUID();
   const ctx = { orgId, projectId, ownerId, sourceType, fileId, metadata: { ...metadata, traceId } };
   const model = env.openaiIngestionModel;
-  const maxTokens = metadata?.isBatch ? 2048 : 1024;
+  const maxTokens = metadata?.isBatch || metadata?.isEmail ? 2048 : 1024;
   const messages = [{ role: 'user', content: candidateContent(text, metadata) }];
   const system = `${SYSTEM_PROMPT}${currentDateTimePrompt()}${projectContextPrompt(projectContext)}`;
   let outcome = { action: 'skipped', actions: [] };

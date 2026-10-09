@@ -52,7 +52,7 @@ async function processFile(fileId, { traceId = randomUUID() } = {}) {
         orgId: file.orgId,
         projectId: file.projectId,
         ownerId: file.ownerId,
-        sourceType: file.sourceType === 'whatsapp' ? 'whatsapp' : 'file',
+        sourceType: ['whatsapp', 'email'].includes(file.sourceType) ? file.sourceType : 'file',
         fileId: file._id,
         text,
         metadata: {
@@ -60,6 +60,16 @@ async function processFile(fileId, { traceId = randomUUID() } = {}) {
           chunkIndex: index,
           traceId,
           ...(file.sourceType === 'whatsapp' ? file.whatsapp.toObject?.() || file.whatsapp : {}),
+          ...(file.sourceType === 'email'
+            ? {
+                integrationId: file.email.integrationId,
+                emailMessageId: file.email.emailMessageId,
+                mailbox: file.email.mailbox,
+                emailSubject: file.email.subject,
+                emailFrom: file.email.from,
+                messageTimestamp: file.email.sentAt,
+              }
+            : {}),
         },
         projectContext: project ? { name: project.name, description: project.description, websiteUrl: project.websiteUrl } : null,
       });

@@ -63,7 +63,7 @@ const listMyProjects = asyncHandler(async (req, res) => {
 const getProject = asyncHandler(async (req, res) => {
   const project = await Project.findOne({ _id: req.projectId, orgId: req.org.id });
   if (!project) throw new ApiError(404, 'Project not found.');
-  const canManageMemory = req.projectMembership?.role === 'admin' || String(project.createdBy) === String(req.user.id);
+  const canManageMemory = req.projectMembership?.role === 'admin';
   res.json({ project: { id: project._id, name: project.name, description: project.description, websiteUrl: project.websiteUrl, createdBy: project.createdBy, createdAt: project.createdAt, canManageMemory } });
 });
 

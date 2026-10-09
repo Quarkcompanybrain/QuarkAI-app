@@ -10,6 +10,7 @@ export interface ProjectMember {
 
 export interface WhatsAppMemoryChunk {
   id: string;
+  sourceType: 'whatsapp' | 'email';
   text: string;
   chatName: string | null;
   chatJid: string | null;
@@ -39,7 +40,7 @@ export const projectsApi = {
 
   listSources: (projectId: string) => api.get<{ sources: ProjectSource[] }>(`/projects/${projectId}/sources`),
 
-  addSource: (projectId: string, integrationId: string, chatJid: string) =>
+  addSource: (projectId: string, integrationId: string, chatJid?: string) =>
     api.post<{ source: { id: string; chatName: string } }>(`/projects/${projectId}/sources`, {
       integrationId,
       chatJid,

@@ -146,7 +146,9 @@ quark-ai/
 6. **Polish** — Tailwind theme, blank logo placeholder, OTP/invite rate limiting
 
 ## 6. Deferred to Future Scope
-- Connectors: Zoho, WhatsApp, email ingestion
+- Connectors: Zoho (WhatsApp and IMAP email ingestion have shipped)
+- Email reply drafting on top of email ingestion — on hold (see README)
+- Email OAuth (Gmail API / Microsoft Graph) for providers that block password IMAP, e.g. Microsoft 365
 - Custom per-project metrics
 - Swap Gmail app-password email to a transactional provider (SES/Resend) before real launch volume
 - OCR for scanned/image uploads (note: Claude vision already handles most image text directly — revisit whether dedicated OCR is even needed)

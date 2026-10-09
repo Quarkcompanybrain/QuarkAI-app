@@ -5,7 +5,7 @@ import { projectsApi, type WhatsAppMemoryChunk } from '../features/projects/api'
 import { PulseNode } from '../components/PulseNode';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorBanner } from '../components/ErrorBanner';
-import { ChatBubbleIcon, PencilIcon, TrashIcon } from '../components/icons';
+import { ChatBubbleIcon, MailIcon, PencilIcon, TrashIcon } from '../components/icons';
 import type { Project } from '../types';
 
 interface ProjectOutletContext {
@@ -65,7 +65,7 @@ export function ProjectMemory() {
         <FilesPanel projectId={projectId} canManageChunks={Boolean(project?.canManageMemory)} />
 
         <section>
-          <h2 className="mb-4 font-display text-lg font-semibold text-ink">WhatsApp knowledge</h2>
+          <h2 className="mb-4 font-display text-lg font-semibold text-ink">WhatsApp & email knowledge</h2>
           <ErrorBanner message={error} />
 
           {chunks === null ? (
@@ -75,19 +75,19 @@ export function ProjectMemory() {
           ) : chunks.length === 0 ? (
             <EmptyState
               icon={<ChatBubbleIcon className="h-5 w-5 text-magenta-500" />}
-              title="No WhatsApp knowledge yet"
-              description="Once a connected chat sends something worth remembering, it'll show up here."
+              title="No WhatsApp or email knowledge yet"
+              description="Once a linked chat or mailbox receives something worth remembering, it'll show up here."
             />
           ) : (
             <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150 shadow-xs">
               {chunks.map((c) => (
                 <li key={c.id} className="flex items-start gap-3 px-4 py-3">
                   <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-150 bg-neutral-50 text-neutral-400">
-                    <ChatBubbleIcon className="h-4 w-4" />
+                    {c.sourceType === 'email' ? <MailIcon className="h-4 w-4" /> : <ChatBubbleIcon className="h-4 w-4" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <p className="truncate text-xs font-medium text-neutral-500">{c.chatName || c.chatJid || 'WhatsApp'}</p>
+                      <p className="truncate text-xs font-medium text-neutral-500">{c.chatName || c.chatJid || (c.sourceType === 'email' ? 'Email' : 'WhatsApp')}</p>
                       {c.messageTimestamp && (
                         <p className="shrink-0 text-xs text-neutral-400">
                           {new Date(c.messageTimestamp).toLocaleString()}

@@ -10,7 +10,7 @@ const SYSTEM_PROMPT = `You are Quark AI, a company-knowledge assistant. You have
 const GET_KNOWLEDGE_TOOL = {
   name: 'get_knowledge',
   description:
-    "Search the user's stored knowledge base (uploaded documents and WhatsApp-sourced knowledge) for information relevant to a query. Use this proactively for substantive questions when stored context could help; skip only simple greetings, small talk, and clearly unrelated general questions.",
+    "Search the user's stored knowledge base (uploaded documents, plus knowledge from WhatsApp chats and email) for information relevant to a query. Use this proactively for substantive questions when stored context could help; skip only simple greetings, small talk, and clearly unrelated general questions.",
   input_schema: {
     type: 'object',
     properties: {
@@ -69,7 +69,7 @@ async function streamAnswer({ history, orgId, scope, projectId, ownerId, onToken
         for (const r of results) collectedSources.push({ id: r._id, filename: r.metadata?.filename, score: r.score });
 
         const content = results.length
-          ? results.map((r, idx) => `[${idx + 1}] (from ${r.metadata?.filename || 'a message'})\n${r.text}`).join('\n\n')
+          ? results.map((r, idx) => `[${idx + 1}] (from ${r.metadata?.filename || (r.metadata?.emailSubject ? `email "${r.metadata.emailSubject}"` : 'a message')})\n${r.text}`).join('\n\n')
           : 'No relevant knowledge found.';
         Sentry.logger.info('AI chat knowledge retrieval completed', { traceId, iteration: i + 1, input: block.input, results, toolResult: content });
 

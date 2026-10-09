@@ -30,6 +30,7 @@ module.exports = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   anthropicChatModel: process.env.ANTHROPIC_CHAT_MODEL || 'claude-sonnet-4-5',
   anthropicChatTitleModel: process.env.ANTHROPIC_CHAT_TITLE_MODEL || 'claude-haiku-4-5',
+  anthropicReportModel: process.env.ANTHROPIC_REPORT_MODEL || process.env.ANTHROPIC_CHAT_MODEL || 'claude-sonnet-4-5',
 
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
@@ -37,7 +38,16 @@ module.exports = {
   whatsappIngestionBatchWindowMs: Number(process.env.WHATSAPP_INGESTION_BATCH_WINDOW_MS) || 300_000,
   whatsappIngestionBatchMaxMessages: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_MESSAGES) || 30,
   whatsappIngestionBatchMaxChars: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_CHARS) || 12_000,
+  emailSyncPollMs: Number(process.env.EMAIL_SYNC_POLL_MS) || 120_000,
+  emailIngestionPollMs: Number(process.env.EMAIL_INGESTION_POLL_MS) || 15_000,
   whatsappIngestionBatchPollMs: Number(process.env.WHATSAPP_INGESTION_BATCH_POLL_MS) || 15_000,
+
+  // Daily brief emailed to org admins. Sent once per org per local date, at or
+  // after DAILY_REPORT_HOUR in DAILY_REPORT_TIMEZONE.
+  dailyReportEnabled: process.env.DAILY_REPORT_ENABLED !== 'false',
+  dailyReportHour: process.env.DAILY_REPORT_HOUR ? Number(process.env.DAILY_REPORT_HOUR) : 9,
+  dailyReportTimezone: process.env.DAILY_REPORT_TIMEZONE || 'Asia/Kolkata',
+  dailyReportPollMs: Number(process.env.DAILY_REPORT_POLL_MS) || 300_000,
 
   sentryDsn: process.env.SENTRY_DSN,
 

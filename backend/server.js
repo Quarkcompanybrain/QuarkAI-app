@@ -11,6 +11,8 @@ const routes = require('./src/routes');
 const { errorHandler } = require('./src/middleware/errorHandler');
 const { reconnectAllActiveIntegrations } = require('./src/services/whatsapp/connectionManager');
 const { startWhatsAppTextBatchWorker } = require('./src/services/whatsapp/ingest.service');
+const { startDailyReportWorker } = require('./src/services/reports/dailyReport.service');
+const { startEmailWorkers } = require('./src/services/emailIngest/sync.service');
 
 const app = express();
 
@@ -38,6 +40,8 @@ async function start() {
   await connectDb();
   await ensureVectorIndex();
   startWhatsAppTextBatchWorker();
+  startDailyReportWorker();
+  startEmailWorkers();
   app.listen(env.port, () => {
     console.log(`[server] listening on http://localhost:${env.port}`);
     Sentry.logger.info('Server started', { port: env.port, env: env.nodeEnv });

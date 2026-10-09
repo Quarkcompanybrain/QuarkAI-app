@@ -29,6 +29,7 @@ export function ProjectSettings() {
         <ProjectDetailsForm projectId={projectId} project={project} onRenamed={refreshProject} />
         <MembersSection projectId={projectId} />
         <WhatsAppSourcesSection projectId={projectId} />
+        <EmailSourcesSection projectId={projectId} />
         <ProjectDeleteSection projectId={projectId} project={project} onDeleted={() => navigate('/personal/chat', { replace: true })} />
       </div>
     </div>
@@ -321,25 +322,14 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
     setLoading(true);
     Promise.all([integrationsApi.list(), projectsApi.listSources(projectId)])
       .then(async ([integrationsRes, sourcesRes]) => {
-        const connected = integrationsRes.integrations.filter((i) => i.status === 'connected');
+        const connected = integrationsRes.integrations.filter((i) => i.type === 'whatsapp' && i.status === 'connected');
         setConnectedIntegrations(connected);
         setSources(sourcesRes.sources);
 
         const chatLists = await Promise.all(connected.map((i) => integrationsApi.listChats(i.id)));
         const byIntegration: Record<string, WhatsAppChat[]> = {};
         connected.forEach((integration, i) => {
-          const chats = chatLists[i].chats;
-          // Keep a previously selected source removable even if its old cache
-          // row used an internal LID that is no longer shown in the picker.
-          const missingSelectedSources = sourcesRes.sources
-            .filter((source) => source.integrationId === integration.id && !chats.some((chat) => chat.jid === source.chatJid))
-            .map((source) => ({
-              jid: source.chatJid,
-              name: source.chatName || source.chatJid,
-              isGroup: source.isGroup,
-              lastMessageAt: null,
-            }));
-          byIntegration[integration.id] = [...missingSelectedSources, ...chats];
+          byIntegration[integration.id] = chatLists[i].chats;
         });
         setChatsByIntegration(byIntegration);
       })
@@ -350,7 +340,7 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
   const MAX_SOURCES = 10;
   const MAX_BROWSE_CHATS = 10;
   const sourceKey = (integrationId: string, jid: string) => `${integrationId}:${jid}`;
-  const selectedKeys = new Set(sources.map((s) => sourceKey(s.integrationId, s.chatJid)));
+  const selectedKeys = new Set(sources.filter((s) => s.sourceType === 'whatsapp' && s.chatJid).map((s) => sourceKey(s.integrationId, s.chatJid as string)));
   const atLimit = sources.length >= MAX_SOURCES;
 
   const visibleChats = (integrationId: string, chats: WhatsAppChat[]) => {
@@ -385,12 +375,12 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
       <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="font-display text-lg font-semibold text-ink">WhatsApp sources</h2>
         <span className={`text-xs font-medium ${atLimit ? 'text-magenta-600' : 'text-neutral-400'}`}>
-          {sources.length}/{MAX_SOURCES} connected
+          {sources.length}/{MAX_SOURCES} sources used
         </span>
       </div>
       <p className="mb-4 text-sm text-neutral-500">
-        Pick which of your connected chats and groups should feed this project's memory. Up to {MAX_SOURCES} per
-        project.
+        Pick which of your connected chats and groups should feed this project's memory. A project can have up to{' '}
+        {MAX_SOURCES} sources across WhatsApp and email.
       </p>
 
       <ErrorBanner message={error} />
@@ -463,6 +453,132 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
   );
 }
 
+// A mailbox is linked whole: every new email in its inbox and sent folder is
+// evaluated for this project. Members link their own mailboxes; a teammate's
+// linked mailbox is shown but only its owner can link or unlink it here.
+function EmailSourcesSection({ projectId }: { projectId: string }) {
+  const user = useAuthStore((state) => state.user);
+  const [mailboxes, setMailboxes] = useState<Integration[]>([]);
+  const [sources, setSources] = useState<ProjectSource[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshSources = () => projectsApi.listSources(projectId).then((r) => setSources(r.sources));
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([integrationsApi.list(), projectsApi.listSources(projectId)])
+      .then(([integrationsRes, sourcesRes]) => {
+        setMailboxes(integrationsRes.integrations.filter((i) => i.type === 'email'));
+        setSources(sourcesRes.sources);
+      })
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  const MAX_SOURCES = 10;
+  const emailSources = sources.filter((s) => s.sourceType === 'email');
+  const myMailboxIds = new Set(mailboxes.map((m) => m.id));
+  const teammateSources = emailSources.filter((s) => !myMailboxIds.has(s.integrationId) && s.addedBy !== user?.id);
+  const atLimit = sources.length >= MAX_SOURCES;
+
+  const handleToggle = async (mailbox: Integration) => {
+    setError(null);
+    setBusyId(mailbox.id);
+    try {
+      const existing = emailSources.find((s) => s.integrationId === mailbox.id);
+      if (existing) await projectsApi.removeSource(projectId, existing.id);
+      else await projectsApi.addSource(projectId, mailbox.id);
+      await refreshSources();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : 'Something went wrong.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Card>
+      <h2 className="mb-1 font-display text-lg font-semibold text-ink">Email sources</h2>
+      <p className="mb-4 text-sm text-neutral-500">
+        Link a mailbox to have new emails it sends and receives evaluated for this project's memory. If one mailbox
+        covers several projects, link it to each — every project keeps only what's relevant to it.
+      </p>
+
+      <ErrorBanner message={error} />
+
+      {loading ? (
+        <p className="text-sm text-neutral-500">Loading…</p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {mailboxes.length === 0 ? (
+            <p className="text-sm text-neutral-500">
+              You haven't connected a mailbox yet.{' '}
+              <Link to="/integrations" className="font-medium text-magenta-600 hover:underline">
+                Connect one
+              </Link>{' '}
+              to link it here.
+            </p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
+              {mailboxes.map((mailbox) => {
+                const linked = emailSources.some((s) => s.integrationId === mailbox.id);
+                const failed = mailbox.status !== 'connected';
+                return (
+                  <li key={mailbox.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-ink">{mailbox.emailAddress}</p>
+                      <p className={`text-xs ${failed ? 'text-magenta-600' : 'text-neutral-500'}`}>
+                        {failed ? 'Sign-in failed — reconnect it on the Integrations page' : 'Inbox and sent mail'}
+                      </p>
+                    </div>
+                    <ToggleSwitch
+                      checked={linked}
+                      disabled={busyId === mailbox.id || (!linked && (atLimit || failed))}
+                      onToggle={() => handleToggle(mailbox)}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {teammateSources.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">Linked by teammates</p>
+              <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
+                {teammateSources.map((source) => (
+                  <li key={source.id} className="px-4 py-3 text-sm text-ink">
+                    {source.chatName}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ToggleSwitch({ checked, disabled, onToggle }: { checked: boolean; disabled: boolean; onToggle: () => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onToggle}
+      className={`relative h-6 w-10 shrink-0 rounded-full p-0.5 transition-colors focus-visible:ring-1 focus-visible:ring-magenta-300 focus-visible:ring-offset-1 ${
+        checked ? 'bg-magenta-500' : 'bg-neutral-200'
+      } ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
+    >
+      <span
+        className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${checked ? 'translate-x-4' : 'translate-x-0'}`}
+      />
+    </button>
+  );
+}
+
 function WhatsAppChatRow({
   chat,
   checked,
@@ -480,21 +596,7 @@ function WhatsAppChatRow({
         <p className="truncate text-sm font-medium text-ink">{chat.name || chat.jid}</p>
         <p className="text-xs text-neutral-500">{chat.isGroup ? 'Group' : 'Individual chat'}</p>
       </div>
-      <button
-        role="switch"
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={onToggle}
-        className={`relative h-6 w-10 shrink-0 rounded-full p-0.5 transition-colors focus-visible:ring-1 focus-visible:ring-magenta-300 focus-visible:ring-offset-1 ${
-          checked ? 'bg-magenta-500' : 'bg-neutral-200'
-        } ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
-      >
-        <span
-          className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-            checked ? 'translate-x-4' : 'translate-x-0'
-          }`}
-        />
-      </button>
+      <ToggleSwitch checked={checked} disabled={disabled} onToggle={onToggle} />
     </li>
   );
 }

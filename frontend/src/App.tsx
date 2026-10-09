@@ -26,6 +26,13 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// The backend enforces this too; this only keeps members off a form they can't submit.
+function OrgAdminRoute({ children }: { children: ReactNode }) {
+  const role = useAuthStore((s) => s.activeOrg?.role);
+  if (role !== 'admin') return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -59,7 +66,7 @@ export default function App() {
             <Route path="files" element={<PersonalFiles />} />
           </Route>
 
-          <Route path="/projects/new" element={<ProjectCreate />} />
+          <Route path="/projects/new" element={<OrgAdminRoute><ProjectCreate /></OrgAdminRoute>} />
 
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<Navigate to="chat" replace />} />

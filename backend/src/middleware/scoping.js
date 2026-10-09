@@ -1,5 +1,4 @@
 const ProjectMembership = require('../models/ProjectMembership');
-const Project = require('../models/Project');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
@@ -38,8 +37,7 @@ const requireProjectMember = asyncHandler(async (req, res, next) => {
   next();
 });
 
-// Project creators are admins for older projects created before the explicit
-// role field existed. New projects persist that role on their membership.
+// Project admins are recorded on the membership (the creator is made admin).
 const requireProjectAdmin = asyncHandler(async (req, res, next) => {
   const projectId = req.projectId || req.params.projectId || req.body.projectId || req.query.projectId;
   const membership = req.projectMembership || await ProjectMembership.findOne({
@@ -48,12 +46,7 @@ const requireProjectAdmin = asyncHandler(async (req, res, next) => {
     orgId: req.org.id,
   });
   if (!membership) throw new ApiError(403, 'You are not a member of this project.');
-
-  const project = await Project.findOne({ _id: projectId, orgId: req.org.id }).select('createdBy');
-  if (!project) throw new ApiError(404, 'Project not found.');
-  if (membership.role !== 'admin' && String(project.createdBy) !== String(req.user.id)) {
-    throw new ApiError(403, 'Only project admins can change saved knowledge.');
-  }
+  if (membership.role !== 'admin') throw new ApiError(403, 'Only project admins can change saved knowledge.');
 
   req.projectIsAdmin = true;
   next();

@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "report:daily": "node scripts/dailyReport.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

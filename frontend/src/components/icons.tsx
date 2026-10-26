@@ -2,9 +2,11 @@
 // source every interface icon from react-icons rather than custom SVG paths.
 export {
   LuBrainCircuit as BrainIcon,
+  LuCheck as CheckIcon,
   LuChevronDown as ChevronDownIcon,
   LuCircleAlert as AlertTriangleIcon,
   LuCircleHelp as InfoIcon,
+  LuCopy as CopyIcon,
   LuEye as EyeIcon,
   LuEyeOff as EyeOffIcon,
   LuFileText as FileTextIcon,
@@ -23,5 +25,6 @@ export {
   LuUpload as UploadIcon,
   LuUserRound as UserIcon,
   LuUsersRound as UsersIcon,
+  LuWebhook as WebhookIcon,
   LuX as XIcon,
 } from 'react-icons/lu';

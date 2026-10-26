@@ -53,6 +53,9 @@ const whatsappMessageSchema = new Schema(
     },
     hasIngestedMemory: { type: Boolean, default: false },
     projectIngestions: { type: [projectIngestionSchema], default: [] },
+    // Set only on messages from chats no project uses; a TTL index deletes
+    // them at this time. Linking the chat to a project clears it.
+    expiresAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -63,8 +66,8 @@ whatsappMessageSchema.index({ integrationId: 1, messageId: 1, chatJid: 1, fromMe
 whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, sentAt: -1 });
 whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, fromMe: 1, sentAt: -1 });
 whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, senderJid: 1, sentAt: -1 });
-whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, content: 'text' });
 whatsappMessageSchema.index({ 'projectIngestions.projectId': 1 });
 whatsappMessageSchema.index({ integrationId: 1, chatJid: 1, 'projectIngestions.projectId': 1, 'projectIngestions.status': 1, createdAt: 1 });
+whatsappMessageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = model('WhatsAppMessage', whatsappMessageSchema);

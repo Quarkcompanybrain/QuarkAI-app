@@ -1,6 +1,7 @@
 const Sentry = require('@sentry/node');
 const { openai } = require('../../config/openai');
 const env = require('../../config/env');
+const { assertAiAvailable, noteAiError } = require('../../utils/aiErrors');
 
 const SYSTEM_PROMPT = `You read a document and split it into semantically coherent chunks for a retrieval system.
 Rules:
@@ -77,11 +78,15 @@ async function splitFileIntoChunks(handlerOutput, filename, { traceId } = {}) {
     content: loggableContent(content),
   });
 
+  assertAiAvailable();
   const response = await openai.responses.create({
     model,
     instructions: SYSTEM_PROMPT,
     max_output_tokens: 8192,
     input: [{ role: 'user', content }],
+  }).catch((err) => {
+    noteAiError(err);
+    throw err;
   });
   const rawText = response.output_text;
   Sentry.logger.info('AI file chunking model response', { traceId, provider: 'openai', model, filename, rawText, usage: response.usage });

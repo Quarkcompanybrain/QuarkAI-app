@@ -2,6 +2,7 @@ const Sentry = require('@sentry/node');
 const ProjectSource = require('../models/ProjectSource');
 const Integration = require('../models/Integration');
 const WhatsAppChat = require('../models/WhatsAppChat');
+const WhatsAppMessage = require('../models/WhatsAppMessage');
 const Chunk = require('../models/Chunk');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
@@ -30,7 +31,7 @@ async function assertSourceCapacity(projectId) {
   }
 }
 
-// You can only add chats or mailboxes from your own connected accounts —
+// You can only add chats, mailboxes or Cheerio connections from your own connected accounts —
 // linking a teammate's WhatsApp or email on their behalf isn't something
 // they've consented to just by being on the same project.
 const addSource = asyncHandler(async (req, res) => {
@@ -40,21 +41,23 @@ const addSource = asyncHandler(async (req, res) => {
   const integration = await Integration.findOne({ _id: integrationId, userId: req.user.id });
   if (!integration) throw new ApiError(403, 'You can only add sources from your own connected accounts.');
 
-  // A mailbox is linked whole; mail starts flowing from the next sync onward.
-  if (integration.type === 'email') {
-    if (integration.status !== 'connected') throw new ApiError(409, 'Reconnect this mailbox before linking it.');
+  // A mailbox or Cheerio connection is linked whole; content starts flowing
+  // from the next mail sync or webhook call onward.
+  if (integration.type === 'email' || integration.type === 'cheerio') {
+    const label = integration.type === 'email' ? 'mailbox' : 'Cheerio connection';
+    if (integration.status !== 'connected') throw new ApiError(409, `Reconnect this ${label} before linking it.`);
     const existing = await ProjectSource.findOne({ projectId: req.projectId, integrationId });
-    if (existing) throw new ApiError(409, 'This mailbox is already a source for this project.');
+    if (existing) throw new ApiError(409, `This ${label} is already a source for this project.`);
     await assertSourceCapacity(req.projectId);
     const source = await ProjectSource.create({
       projectId: req.projectId,
       orgId: req.org.id,
-      sourceType: 'email',
+      sourceType: integration.type,
       integrationId,
-      chatName: integration.emailAddress,
+      chatName: integration.type === 'email' ? integration.emailAddress : integration.cheerio?.name || 'Cheerio',
       addedBy: req.user.id,
     });
-    Sentry.logger.info('Project email source added', { projectId: req.projectId, integrationId: String(integrationId) });
+    Sentry.logger.info('Project source added', { projectId: req.projectId, integrationId: String(integrationId), sourceType: integration.type });
     return res.status(201).json({ source: { id: source._id, chatName: source.chatName } });
   }
 
@@ -79,6 +82,9 @@ const addSource = asyncHandler(async (req, res) => {
     addedBy: req.user.id,
   });
 
+  // The chat's earlier messages become lasting context for ingestion.
+  await WhatsAppMessage.updateMany({ integrationId, chatJid, expiresAt: { $ne: null } }, { $set: { expiresAt: null } });
+
   Sentry.logger.info('Project source added', { projectId: req.projectId, chatJid });
   res.status(201).json({ source: { id: source._id, chatName: source.chatName } });
 });
@@ -91,11 +97,19 @@ const removeSource = asyncHandler(async (req, res) => {
   res.json({ message: 'Removed.' });
 });
 
-// Actual ingested WhatsApp and email knowledge for the project's Memory tab —
-// distinct from listSources (which chats/mailboxes are picked), this is what
-// got saved from them.
+function chunkSourceLabels(chunk) {
+  if (chunk.sourceType === 'email') return { chatName: chunk.metadata?.emailSubject || chunk.metadata?.mailbox || null, sender: chunk.metadata?.emailFrom || null };
+  if (chunk.sourceType === 'cheerio') {
+    return { chatName: chunk.metadata?.cheerioConnection || 'Cheerio', sender: chunk.metadata?.contactName || chunk.metadata?.contactPhone || null };
+  }
+  return { chatName: chunk.metadata?.chatName || null, sender: chunk.metadata?.sender || null };
+}
+
+// Actual ingested WhatsApp, email and Cheerio knowledge for the project's
+// Memory tab — distinct from listSources (which chats/mailboxes/connections
+// are picked), this is what got saved from them.
 const listWhatsAppMemory = asyncHandler(async (req, res) => {
-  const chunks = await Chunk.find({ projectId: req.projectId, sourceType: { $in: ['whatsapp', 'email'] } })
+  const chunks = await Chunk.find({ projectId: req.projectId, sourceType: { $in: ['whatsapp', 'email', 'cheerio'] } })
     .sort({ createdAt: -1 })
     .limit(100);
 
@@ -104,9 +118,8 @@ const listWhatsAppMemory = asyncHandler(async (req, res) => {
       id: c._id,
       sourceType: c.sourceType,
       text: c.text,
-      chatName: c.sourceType === 'email' ? c.metadata?.emailSubject || c.metadata?.mailbox || null : c.metadata?.chatName || null,
+      ...chunkSourceLabels(c),
       chatJid: c.metadata?.chatJid || null,
-      sender: c.sourceType === 'email' ? c.metadata?.emailFrom || null : c.metadata?.sender || null,
       messageTimestamp: c.metadata?.messageTimestamp || null,
     })),
   });

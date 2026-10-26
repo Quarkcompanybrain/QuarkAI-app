@@ -14,11 +14,13 @@ const { processFile } = require('../processing/processFile');
 const { SUPPORTED_MIME_TYPES } = require('../file_handlers/registry');
 const { normalizeMessageContent } = require('baileys');
 const env = require('../../config/env');
+const { isAiPaused, nextRetry, shouldReport } = require('../../utils/aiErrors');
 
 const MAX_UNSPLIT_MESSAGE_LENGTH = 2000;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const BATCH_CLAIM_MS = 5 * 60 * 1000;
-const BATCH_RETRY_DELAY_MS = 30 * 1000;
+const ATTACHMENT_CLAIM_MS = 15 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 // WhatsApp documents use the same supported-format registry as uploaded
 // files: images, PDF, DOCX, PPTX, XLSX, CSV, TXT, and Markdown.
 const SUPPORTED_ATTACHMENT_MIME_TYPES = new Set(SUPPORTED_MIME_TYPES);
@@ -138,7 +140,10 @@ async function ingestTextForProject({ messageRecord, source, integration, text, 
   return { chunkIds, skippedCount, totalCount: candidates.length };
 }
 
-async function ingestAttachmentForProject({ buffer, attachment, messageRecord, source, integration, senderJid, senderName, senderPhoneNumber, traceId }) {
+// WhatsApp media can only be downloaded while the live message event is at
+// hand, so each project's copy is stored as a File first; a retry reprocesses
+// that File instead of downloading again.
+async function storeAttachmentFile({ buffer, attachment, messageRecord, source, integration, traceId }) {
   const filename = attachmentFilename(attachment, messageRecord.sentAt);
   const key = buildKey({ orgId: source.orgId, projectId: source.projectId, ownerId: integration.userId, filename });
   await uploadBuffer({ key, buffer, mimeType: attachment.mimeType });
@@ -156,16 +161,15 @@ async function ingestAttachmentForProject({ buffer, attachment, messageRecord, s
       sourceMessageId: messageRecord._id,
       chatJid: source.chatJid,
       chatName: source.chatName || messageRecord.chatName,
-      sender: senderJid,
-      senderName,
-      senderPhoneNumber,
+      sender: messageRecord.senderJid,
+      senderName: messageRecord.senderName,
+      senderPhoneNumber: messageRecord.senderPhoneNumber,
       fromMe: messageRecord.fromMe,
       messageTimestamp: messageRecord.sentAt,
     },
   });
   Sentry.logger.info('WhatsApp attachment stored for AI processing', { traceId, fileId: String(file._id), attachment, messageId: messageRecord.messageId, projectId: String(source.projectId) });
-  const result = await processFile(file._id, { traceId });
-  return { fileId: String(file._id), chunkIds: result.chunkIds || [] };
+  return file._id;
 }
 
 function batchGroupKey({ integrationId, chatJid, projectId, sourceId }) {
@@ -265,31 +269,48 @@ async function completeBatchEntry(messageId, group, batchId, { status, reason, c
   if (result.modifiedCount) await refreshMessageIngestionSummary(messageId);
 }
 
-async function retryBatchEntries(messageIds, group, batchId, err) {
-  const nextAttemptAt = new Date(Date.now() + BATCH_RETRY_DELAY_MS);
-  await Promise.all(messageIds.map((messageId) => WhatsAppMessage.updateOne(
-    {
-      _id: messageId,
-      projectIngestions: {
-        $elemMatch: {
-          projectId: group.projectId,
-          sourceId: group.sourceId,
-          status: 'processing',
-          batchId,
+function projectIngestionFor(message, group) {
+  return message.projectIngestions?.find((entry) => String(entry.projectId) === String(group.projectId) && String(entry.sourceId) === String(group.sourceId));
+}
+
+// Every message in a failed batch either goes back to pending for a later
+// attempt or, once its attempts run out (or the error can't be fixed by
+// retrying), is marked failed.
+async function retryBatchEntries(messages, group, batchId, err) {
+  const reason = err.message?.slice(0, 500) || 'Batch ingestion failed.';
+  await Promise.all(messages.map(async (message) => {
+    // `message` is the pre-claim snapshot; the claim added one attempt.
+    const attempts = (projectIngestionFor(message, group)?.attempts || 0) + 1;
+    const retry = nextRetry(err, attempts);
+    if (!retry) {
+      await completeBatchEntry(message._id, group, batchId, { status: 'failed', reason });
+      return;
+    }
+    await WhatsAppMessage.updateOne(
+      {
+        _id: message._id,
+        projectIngestions: {
+          $elemMatch: {
+            projectId: group.projectId,
+            sourceId: group.sourceId,
+            status: 'processing',
+            batchId,
+          },
         },
       },
-    },
-    {
-      $set: {
-        'projectIngestions.$.status': 'pending',
-        'projectIngestions.$.reason': err.message?.slice(0, 500) || 'Batch ingestion failed; retry scheduled.',
-        'projectIngestions.$.batchId': null,
-        'projectIngestions.$.processingStartedAt': null,
-        'projectIngestions.$.processingExpiresAt': null,
-        'projectIngestions.$.nextAttemptAt': nextAttemptAt,
-      },
-    }
-  )));
+      {
+        $set: {
+          'projectIngestions.$.status': 'pending',
+          'projectIngestions.$.reason': reason,
+          'projectIngestions.$.batchId': null,
+          'projectIngestions.$.processingStartedAt': null,
+          'projectIngestions.$.processingExpiresAt': null,
+          'projectIngestions.$.nextAttemptAt': retry.at,
+        },
+        ...(retry.countsAsAttempt ? {} : { $inc: { 'projectIngestions.$.attempts': -1 } }),
+      }
+    );
+  }));
 }
 
 function scheduleTextBatch(group, delayMs = env.whatsappIngestionBatchWindowMs) {
@@ -447,9 +468,9 @@ async function processTextBatchGroup(group, { force = false } = {}) {
     Sentry.logger.info('WhatsApp text batch completed', { traceId, batchId, group, outcome, messageCount: messages.length, linkedChunkIds: [...new Set(linked)] });
   } catch (err) {
     if (batchId && messages.length) {
-      await retryBatchEntries(messages.map((message) => message._id), group, batchId, err);
-      Sentry.captureException(err, { tags: { pipeline: 'whatsapp_text_batch' }, extra: { traceId, batchId, group, messageIds: messages.map((message) => String(message._id)) } });
-      Sentry.logger.info('WhatsApp text batch failed and will retry', { traceId, batchId, group, error: err.message });
+      await retryBatchEntries(messages, group, batchId, err);
+      if (shouldReport(err)) Sentry.captureException(err, { tags: { pipeline: 'whatsapp_text_batch' }, extra: { traceId, batchId, group, messageIds: messages.map((message) => String(message._id)) } });
+      Sentry.logger.info('WhatsApp text batch failed', { traceId, batchId, group, error: err.message });
     } else {
       Sentry.captureException(err, { tags: { pipeline: 'whatsapp_text_batch_claim' }, extra: { group } });
     }
@@ -485,6 +506,8 @@ async function processDueTextBatches() {
   batchWorkerRunning = true;
   try {
     await recoverExpiredBatchClaims();
+    if (isAiPaused()) return;
+    await processDueAttachmentEntries();
     const now = new Date();
     const groups = await WhatsAppMessage.aggregate([
       { $match: { content: { $type: 'string', $ne: '' }, projectIngestions: { $elemMatch: { status: 'pending' } } } },
@@ -636,6 +659,9 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
 
   if (sources.length === 0) {
     messageRecord.ingestionStatus = 'not_subscribed';
+    // Messages from chats no project uses are only kept for a while, as
+    // context in case the chat is linked later (linking clears this).
+    messageRecord.expiresAt = new Date(Date.now() + env.whatsappUnlinkedMessageRetentionDays * DAY_MS);
     await messageRecord.save();
     Sentry.logger.info('WhatsApp ingestion stopped because no project source matches', { traceId, messageId, chatJid });
     return;
@@ -660,12 +686,12 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
     Sentry.logger.info('WhatsApp ingestion skipped unsupported or empty message', { traceId, messageId, chatJid, text, attachment, reason });
     return;
   }
-  await messageRecord.save();
 
   // Text-only messages are durable at this point and can wait briefly for
   // neighbouring messages from the same chat and project. Attachments retain
-  // their existing immediate, per-file extraction path below.
+  // their immediate, per-file extraction path below.
   if (text && !supportedAttachment) {
+    await messageRecord.save();
     queueTextBatchForSources(messageRecord, sources);
     Sentry.logger.info('WhatsApp text message queued for batch ingestion', {
       traceId,
@@ -677,102 +703,174 @@ async function handleIncomingMessage(integrationId, message, { downloadMedia } =
     return;
   }
 
-  let attachmentBufferPromise = null;
-  const getAttachmentBuffer = async () => {
-    if (!attachmentBufferPromise) {
-      if (!downloadMedia) throw new Error('WhatsApp media downloader is unavailable.');
-      Sentry.logger.info('WhatsApp attachment download started', { traceId, messageId, chatJid, attachment });
-      attachmentBufferPromise = Promise.resolve(downloadMedia()).then((buffer) => {
-        if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('WhatsApp attachment download returned no data.');
-        if (buffer.length > MAX_ATTACHMENT_BYTES) throw new Error('WhatsApp attachment exceeds the 25 MB limit.');
-        Sentry.logger.info('WhatsApp attachment download completed', { traceId, messageId, chatJid, attachment, bytes: buffer.length });
-        return buffer;
-      });
-    }
-    return attachmentBufferPromise;
-  };
+  // Claimed up front so the retry worker leaves these entries alone while
+  // this live event processes them; an interrupted claim is recovered later.
+  const claimedAt = new Date();
+  for (const ingestion of messageRecord.projectIngestions) {
+    ingestion.status = 'processing';
+    ingestion.processingStartedAt = claimedAt;
+    ingestion.processingExpiresAt = new Date(claimedAt.getTime() + ATTACHMENT_CLAIM_MS);
+    ingestion.attempts = 1;
+  }
+  await messageRecord.save();
 
-  let ingestedAny = false;
-  let failedAny = false;
-  const linkedChunkIds = [];
-  const linkedProjectIds = [];
-  for (const [index, source] of sources.entries()) {
-    const projectIngestion = messageRecord.projectIngestions[index];
-    const chunkIds = [];
-    const fileIds = [];
-    try {
-      const project = await Project.findById(source.projectId).select('name description websiteUrl').lean();
-      const projectContext = project ? { name: project.name, description: project.description, websiteUrl: project.websiteUrl } : null;
-      Sentry.logger.info('WhatsApp project ingestion started', { traceId, messageId, chatJid, projectId: String(source.projectId), source, projectContext, text, attachment });
-      let skippedCount = 0;
-      if (text) {
-        const textResult = await ingestTextForProject({
-          messageRecord,
-          source,
-          integration,
-          text,
-          senderJid: sender.senderJid,
-          senderName: sender.senderName,
-          senderPhoneNumber: sender.senderPhoneNumber,
-          projectContext,
-          traceId,
-        });
-        chunkIds.push(...textResult.chunkIds);
-        skippedCount += textResult.skippedCount;
-        Sentry.logger.info('WhatsApp text ingestion completed', { traceId, messageId, projectId: String(source.projectId), textResult });
-      }
-      if (supportedAttachment) {
-        const attachmentResult = await ingestAttachmentForProject({
-          buffer: await getAttachmentBuffer(),
-          attachment,
-          messageRecord,
-          source,
-          integration,
-          senderJid: sender.senderJid,
-          senderName: sender.senderName,
-          senderPhoneNumber: sender.senderPhoneNumber,
-          traceId,
-        });
-        fileIds.push(attachmentResult.fileId);
-        chunkIds.push(...attachmentResult.chunkIds);
-        if (attachmentResult.chunkIds.length === 0) skippedCount++;
-        Sentry.logger.info('WhatsApp attachment ingestion completed', { traceId, messageId, projectId: String(source.projectId), attachmentResult });
-      }
-      projectIngestion.status = chunkIds.length > 0 ? (skippedCount > 0 ? 'partial' : 'ingested') : 'skipped';
-      projectIngestion.reason = chunkIds.length > 0 ? null : 'No lasting information found.';
-      projectIngestion.memoryChunkIds = chunkIds;
-      projectIngestion.fileIds = fileIds;
-      projectIngestion.processedAt = new Date();
-      if (chunkIds.length > 0) {
-        ingestedAny = true;
-        linkedProjectIds.push(source.projectId);
-        linkedChunkIds.push(...chunkIds);
-      }
-      Sentry.logger.info('WhatsApp project ingestion completed', { traceId, messageId, projectId: String(source.projectId), projectIngestion });
-    } catch (err) {
-      failedAny = true;
-      projectIngestion.status = chunkIds.length > 0 ? 'partial' : 'failed';
-      projectIngestion.reason = err.message?.slice(0, 500) || 'Ingestion failed.';
-      projectIngestion.memoryChunkIds = chunkIds;
-      projectIngestion.fileIds = fileIds;
-      projectIngestion.processedAt = new Date();
-      if (chunkIds.length > 0) {
-        ingestedAny = true;
-        linkedProjectIds.push(source.projectId);
-        linkedChunkIds.push(...chunkIds);
-      }
-      Sentry.captureException(err, { tags: { pipeline: 'whatsapp_ingest_project' }, extra: { projectId: String(source.projectId), chatJid, messageId } });
-      Sentry.logger.info('WhatsApp project ingestion failed', { traceId, messageId, projectId: String(source.projectId), error: err.message, projectIngestion });
-    }
+  let buffer = null;
+  let downloadError = null;
+  try {
+    if (!downloadMedia) throw new Error('WhatsApp media downloader is unavailable.');
+    Sentry.logger.info('WhatsApp attachment download started', { traceId, messageId, chatJid, attachment });
+    buffer = await downloadMedia();
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('WhatsApp attachment download returned no data.');
+    if (buffer.length > MAX_ATTACHMENT_BYTES) throw new Error('WhatsApp attachment exceeds the 25 MB limit.');
+    Sentry.logger.info('WhatsApp attachment download completed', { traceId, messageId, chatJid, attachment, bytes: buffer.length });
+  } catch (err) {
+    buffer = null;
+    downloadError = err;
   }
 
-  messageRecord.hasIngestedMemory = ingestedAny;
-  messageRecord.ingestionStatus = failedAny ? (ingestedAny ? 'partial' : 'failed') : 'processed';
-  await messageRecord.save();
-  Sentry.logger.info('WhatsApp ingestion finished', { traceId, messageId, chatJid, ingestedAny, failedAny, linkedProjectIds: linkedProjectIds.map(String), linkedChunkIds: linkedChunkIds.map(String), messageRecord });
-  if (ingestedAny) {
-    await updateChatMemorySummary({ integrationId, chatJid, projectIds: linkedProjectIds, messageId, chunkIds: linkedChunkIds });
-    Sentry.logger.info('WhatsApp message ingested', { messageId, chatJid, projects: linkedProjectIds.map(String), chunkCount: linkedChunkIds.length });
+  for (const source of sources) {
+    await runAttachmentEntry({ messageId: messageRecord._id, projectId: source.projectId, sourceId: source._id, attachment, buffer, downloadError, traceId });
+  }
+}
+
+async function finishAttachmentEntry(messageId, { projectId, sourceId }, fields, inc = null) {
+  const result = await WhatsAppMessage.updateOne(
+    { _id: messageId, projectIngestions: { $elemMatch: { projectId, sourceId, status: 'processing' } } },
+    {
+      $set: Object.fromEntries(
+        Object.entries({ nextAttemptAt: null, ...fields, processingStartedAt: null, processingExpiresAt: null }).map(([key, value]) => [`projectIngestions.$.${key}`, value])
+      ),
+      ...(inc ? { $inc: Object.fromEntries(Object.entries(inc).map(([key, value]) => [`projectIngestions.$.${key}`, value])) } : {}),
+    }
+  );
+  if (result.modifiedCount) await refreshMessageIngestionSummary(messageId);
+}
+
+/**
+ * Evaluates one claimed (attachment message, project) entry: the caption as
+ * text and the attachment as a File. Live events pass the downloaded media;
+ * retries reuse the File stored on the first attempt. A temporary AI failure
+ * puts the entry back to pending for the retry worker.
+ */
+async function runAttachmentEntry({ messageId, projectId, sourceId, attachment = null, buffer = null, downloadError = null, traceId = randomUUID() }) {
+  const messageRecord = await WhatsAppMessage.findById(messageId).lean();
+  const entry = messageRecord && projectIngestionFor(messageRecord, { projectId, sourceId });
+  if (!entry || entry.status !== 'processing') return;
+
+  const group = { projectId, sourceId };
+  const chunkIds = [...(entry.memoryChunkIds || []).map(String)];
+  let fileId = entry.fileIds?.[0] || null;
+  let skippedCount = 0;
+  try {
+    const [source, integration, project] = await Promise.all([
+      ProjectSource.findOne({ _id: sourceId, projectId, sourceType: 'whatsapp' }).lean(),
+      Integration.findById(messageRecord.integrationId).lean(),
+      Project.findById(projectId).select('name description websiteUrl').lean(),
+    ]);
+    if (!source || !integration || !project) {
+      const reason = !source ? 'WhatsApp source is no longer active.' : !integration ? 'WhatsApp integration is no longer available.' : 'Project is no longer available.';
+      await finishAttachmentEntry(messageId, group, { status: 'skipped', reason, processedAt: new Date() });
+      return;
+    }
+    Sentry.logger.info('WhatsApp project ingestion started', { traceId, messageId: messageRecord.messageId, projectId: String(projectId), attempt: entry.attempts, fileId });
+
+    if (!fileId) {
+      if (!buffer) throw downloadError || new Error('The attachment was never stored, and WhatsApp media can only be downloaded when the message arrives.');
+      fileId = await storeAttachmentFile({ buffer, attachment, messageRecord, source, integration, traceId });
+      await WhatsAppMessage.updateOne(
+        { _id: messageId, projectIngestions: { $elemMatch: { projectId, sourceId, status: 'processing' } } },
+        { $set: { 'projectIngestions.$.fileIds': [fileId] } }
+      );
+    }
+
+    if (messageRecord.content) {
+      const textResult = await ingestTextForProject({
+        messageRecord,
+        source,
+        integration,
+        text: messageRecord.content,
+        senderJid: messageRecord.senderJid,
+        senderName: messageRecord.senderName,
+        senderPhoneNumber: messageRecord.senderPhoneNumber,
+        projectContext: { name: project.name, description: project.description, websiteUrl: project.websiteUrl },
+        traceId,
+      });
+      chunkIds.push(...textResult.chunkIds.map(String));
+      skippedCount += textResult.skippedCount;
+    }
+
+    const fileResult = await processFile(fileId, { traceId });
+    chunkIds.push(...(fileResult.chunkIds || []).map(String));
+    if (!fileResult.chunkIds?.length) skippedCount++;
+
+    const memoryChunkIds = [...new Set(chunkIds)];
+    await finishAttachmentEntry(messageId, group, {
+      status: memoryChunkIds.length ? (skippedCount ? 'partial' : 'ingested') : 'skipped',
+      reason: memoryChunkIds.length ? null : 'No lasting information found.',
+      memoryChunkIds,
+      fileIds: [fileId],
+      processedAt: new Date(),
+    });
+    if (memoryChunkIds.length) {
+      await updateChatMemorySummary({ integrationId: messageRecord.integrationId, chatJid: messageRecord.chatJid, projectIds: [projectId], messageId: messageRecord.messageId, chunkIds: memoryChunkIds });
+    }
+    Sentry.logger.info('WhatsApp project ingestion completed', { traceId, messageId: messageRecord.messageId, projectId: String(projectId), memoryChunkIds, fileId });
+  } catch (err) {
+    // Without a stored File there's nothing to retry: the media is gone.
+    const retry = fileId ? nextRetry(err, entry.attempts) : null;
+    const memoryChunkIds = [...new Set(chunkIds)];
+    const reason = err.message?.slice(0, 500) || 'Ingestion failed.';
+    if (retry) {
+      await finishAttachmentEntry(
+        messageId,
+        group,
+        { status: 'pending', reason, memoryChunkIds, fileIds: [fileId], nextAttemptAt: retry.at },
+        retry.countsAsAttempt ? null : { attempts: -1 }
+      );
+    } else {
+      await finishAttachmentEntry(messageId, group, {
+        status: memoryChunkIds.length ? 'partial' : 'failed',
+        reason,
+        memoryChunkIds,
+        fileIds: fileId ? [fileId] : [],
+        processedAt: new Date(),
+      });
+    }
+    if (shouldReport(err)) {
+      Sentry.captureException(err, { tags: { pipeline: 'whatsapp_ingest_project' }, extra: { traceId, projectId: String(projectId), messageId: messageRecord.messageId, attempts: entry.attempts, retryAt: retry?.at || null } });
+    }
+    Sentry.logger.info('WhatsApp project ingestion failed', { traceId, messageId: messageRecord.messageId, projectId: String(projectId), error: err.message, retryAt: retry?.at || null });
+  }
+}
+
+/** Claims and reruns attachment entries whose retry time has come. */
+async function processDueAttachmentEntries() {
+  const now = new Date();
+  const dueEntry = { status: 'pending', batchEligible: false, nextAttemptAt: { $ne: null, $lte: now } };
+  const due = await WhatsAppMessage.find({ projectIngestions: { $elemMatch: dueEntry } })
+    .sort({ sentAt: 1 })
+    .limit(20)
+    .select('projectIngestions')
+    .lean();
+  for (const message of due) {
+    for (const entry of message.projectIngestions) {
+      if (isAiPaused()) return;
+      if (entry.status !== 'pending' || entry.batchEligible || !entry.nextAttemptAt || entry.nextAttemptAt > now) continue;
+      const claimedAt = new Date();
+      const claimed = await WhatsAppMessage.updateOne(
+        { _id: message._id, projectIngestions: { $elemMatch: { ...dueEntry, projectId: entry.projectId, sourceId: entry.sourceId } } },
+        {
+          $set: {
+            'projectIngestions.$.status': 'processing',
+            'projectIngestions.$.processingStartedAt': claimedAt,
+            'projectIngestions.$.processingExpiresAt': new Date(claimedAt.getTime() + ATTACHMENT_CLAIM_MS),
+            'projectIngestions.$.nextAttemptAt': null,
+          },
+          $inc: { 'projectIngestions.$.attempts': 1 },
+        }
+      );
+      if (claimed.modifiedCount) await runAttachmentEntry({ messageId: message._id, projectId: entry.projectId, sourceId: entry.sourceId });
+    }
   }
 }
 

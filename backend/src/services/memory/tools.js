@@ -74,7 +74,7 @@ const WHATSAPP_CHAT_CONTEXT_TOOL = {
       messageTypes: { type: 'array', items: { type: 'string' }, description: 'Optional message types to include, such as text, extended_text, image, or document.' },
       quotedMessageId: { type: 'string', description: 'Optional WhatsApp message ID. Return replies to that message.' },
       mentionedJid: { type: 'string', description: 'Optional JID. Return messages that mention it.' },
-      textSearch: { type: 'string', description: 'Optional word-based full-text search over plaintext content. Prefer this for topical searches.' },
+      textSearch: { type: 'string', description: 'Optional words to search for in plaintext content; a message matches if it contains any of them. Prefer this for topical searches.' },
       textContains: { type: 'string', description: 'Optional literal text fragment to search in stored plaintext message content.' },
       hasIngestedMemory: { type: 'boolean', description: 'Optional filter for whether a message already produced memory.' },
       maxCharsPerMessage: { type: 'integer', description: 'Maximum content characters per result, from 200 to 4000. Increase only when exact wording matters.' },
@@ -196,8 +196,13 @@ async function executeIngestTool(name, input, ctx) {
     if (Array.isArray(input.messageTypes) && input.messageTypes.length) filter.messageType = { $in: input.messageTypes.slice(0, 20) };
     if (input.quotedMessageId) filter.quotedMessageId = String(input.quotedMessageId).slice(0, 200);
     if (input.mentionedJid) filter.mentionedJids = String(input.mentionedJid).slice(0, 200);
-    if (input.textSearch) filter.$text = { $search: String(input.textSearch).slice(0, 300) };
-    if (input.textContains) filter.content = { $regex: escapeRegex(String(input.textContains).slice(0, 200)), $options: 'i' };
+    // Matched by regex within this one chat, which the indexed integration
+    // and chat filters keep small, so content needs no text index.
+    const contentFilters = [];
+    const searchWords = [...new Set(String(input.textSearch || '').slice(0, 300).split(/\s+/).filter((word) => word.length >= 2))].slice(0, 8);
+    if (searchWords.length) contentFilters.push({ content: { $regex: searchWords.map(escapeRegex).join('|'), $options: 'i' } });
+    if (input.textContains) contentFilters.push({ content: { $regex: escapeRegex(String(input.textContains).slice(0, 200)), $options: 'i' } });
+    if (contentFilters.length) filter.$and = contentFilters;
     if (typeof input.hasIngestedMemory === 'boolean') filter.hasIngestedMemory = input.hasIngestedMemory;
 
     Sentry.logger.info('AI WhatsApp context query started', { traceId, input, filter, limit, maxCharsPerMessage });

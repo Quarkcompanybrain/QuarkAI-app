@@ -40,7 +40,13 @@ module.exports = {
   whatsappIngestionBatchMaxChars: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_CHARS) || 12_000,
   emailSyncPollMs: Number(process.env.EMAIL_SYNC_POLL_MS) || 120_000,
   emailIngestionPollMs: Number(process.env.EMAIL_INGESTION_POLL_MS) || 15_000,
+  cheerioIngestionPollMs: Number(process.env.CHEERIO_INGESTION_POLL_MS) || 15_000,
+  // Public base URL of this API (ending in /api), used to build the Cheerio
+  // webhook URLs shown to users. Without it, the request's own host is used.
+  publicApiUrl: process.env.PUBLIC_API_URL ? process.env.PUBLIC_API_URL.replace(/\/+$/, '') : null,
   whatsappIngestionBatchPollMs: Number(process.env.WHATSAPP_INGESTION_BATCH_POLL_MS) || 15_000,
+  // Messages from chats that no project uses are deleted after this many days.
+  whatsappUnlinkedMessageRetentionDays: Number(process.env.WHATSAPP_UNLINKED_MESSAGE_RETENTION_DAYS) || 30,
 
   // Daily brief emailed to org admins. Sent once per org per local date, at or
   // after DAILY_REPORT_HOUR in DAILY_REPORT_TIMEZONE.

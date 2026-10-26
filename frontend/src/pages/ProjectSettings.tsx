@@ -29,7 +29,8 @@ export function ProjectSettings() {
         <ProjectDetailsForm projectId={projectId} project={project} onRenamed={refreshProject} />
         <MembersSection projectId={projectId} />
         <WhatsAppSourcesSection projectId={projectId} />
-        <EmailSourcesSection projectId={projectId} />
+        <ConnectionSourcesSection projectId={projectId} {...CONNECTION_SOURCE_COPY.email} />
+        <ConnectionSourcesSection projectId={projectId} {...CONNECTION_SOURCE_COPY.cheerio} />
         <ProjectDeleteSection projectId={projectId} project={project} onDeleted={() => navigate('/personal/chat', { replace: true })} />
       </div>
     </div>
@@ -380,7 +381,7 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
       </div>
       <p className="mb-4 text-sm text-neutral-500">
         Pick which of your connected chats and groups should feed this project's memory. A project can have up to{' '}
-        {MAX_SOURCES} sources across WhatsApp and email.
+        {MAX_SOURCES} sources across WhatsApp, email and Cheerio.
       </p>
 
       <ErrorBanner message={error} />
@@ -453,12 +454,43 @@ function WhatsAppSourcesSection({ projectId }: { projectId: string }) {
   );
 }
 
-// A mailbox is linked whole: every new email in its inbox and sent folder is
-// evaluated for this project. Members link their own mailboxes; a teammate's
-// linked mailbox is shown but only its owner can link or unlink it here.
-function EmailSourcesSection({ projectId }: { projectId: string }) {
+// Copy for the sources that are linked as a whole connection rather than
+// chat by chat.
+const CONNECTION_SOURCE_COPY = {
+  email: {
+    type: 'email',
+    title: 'Email sources',
+    description:
+      "Link a mailbox to have new emails it sends and receives evaluated for this project's memory. If one mailbox covers several projects, link it to each — every project keeps only what's relevant to it.",
+    emptyText: "You haven't connected a mailbox yet.",
+    connectedText: 'Inbox and sent mail',
+    failedText: 'Sign-in failed — reconnect it on the Integrations page',
+  },
+  cheerio: {
+    type: 'cheerio',
+    title: 'Cheerio sources',
+    description:
+      "Link a Cheerio connection to have the events its webhook receives evaluated for this project's memory. If one connection covers several projects, link it to each — every project keeps only what's relevant to it.",
+    emptyText: "You haven't created a Cheerio connection yet.",
+    connectedText: 'Events from your Cheerio workflows',
+    failedText: 'Removed — create a new connection on the Integrations page',
+  },
+} as const;
+
+// A mailbox or Cheerio connection is linked whole: everything new it brings
+// in is evaluated for this project. Members link their own connections; a
+// teammate's linked one is shown but only its owner can link or unlink it here.
+function ConnectionSourcesSection({
+  projectId,
+  type,
+  title,
+  description,
+  emptyText,
+  connectedText,
+  failedText,
+}: { projectId: string } & (typeof CONNECTION_SOURCE_COPY)[keyof typeof CONNECTION_SOURCE_COPY]) {
   const user = useAuthStore((state) => state.user);
-  const [mailboxes, setMailboxes] = useState<Integration[]>([]);
+  const [connections, setConnections] = useState<Integration[]>([]);
   const [sources, setSources] = useState<ProjectSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -470,25 +502,25 @@ function EmailSourcesSection({ projectId }: { projectId: string }) {
     setLoading(true);
     Promise.all([integrationsApi.list(), projectsApi.listSources(projectId)])
       .then(([integrationsRes, sourcesRes]) => {
-        setMailboxes(integrationsRes.integrations.filter((i) => i.type === 'email'));
+        setConnections(integrationsRes.integrations.filter((i) => i.type === type));
         setSources(sourcesRes.sources);
       })
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, type]);
 
   const MAX_SOURCES = 10;
-  const emailSources = sources.filter((s) => s.sourceType === 'email');
-  const myMailboxIds = new Set(mailboxes.map((m) => m.id));
-  const teammateSources = emailSources.filter((s) => !myMailboxIds.has(s.integrationId) && s.addedBy !== user?.id);
+  const typeSources = sources.filter((s) => s.sourceType === type);
+  const myConnectionIds = new Set(connections.map((c) => c.id));
+  const teammateSources = typeSources.filter((s) => !myConnectionIds.has(s.integrationId) && s.addedBy !== user?.id);
   const atLimit = sources.length >= MAX_SOURCES;
 
-  const handleToggle = async (mailbox: Integration) => {
+  const handleToggle = async (connection: Integration) => {
     setError(null);
-    setBusyId(mailbox.id);
+    setBusyId(connection.id);
     try {
-      const existing = emailSources.find((s) => s.integrationId === mailbox.id);
+      const existing = typeSources.find((s) => s.integrationId === connection.id);
       if (existing) await projectsApi.removeSource(projectId, existing.id);
-      else await projectsApi.addSource(projectId, mailbox.id);
+      else await projectsApi.addSource(projectId, connection.id);
       await refreshSources();
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : 'Something went wrong.');
@@ -499,11 +531,8 @@ function EmailSourcesSection({ projectId }: { projectId: string }) {
 
   return (
     <Card>
-      <h2 className="mb-1 font-display text-lg font-semibold text-ink">Email sources</h2>
-      <p className="mb-4 text-sm text-neutral-500">
-        Link a mailbox to have new emails it sends and receives evaluated for this project's memory. If one mailbox
-        covers several projects, link it to each — every project keeps only what's relevant to it.
-      </p>
+      <h2 className="mb-1 font-display text-lg font-semibold text-ink">{title}</h2>
+      <p className="mb-4 text-sm text-neutral-500">{description}</p>
 
       <ErrorBanner message={error} />
 
@@ -511,31 +540,29 @@ function EmailSourcesSection({ projectId }: { projectId: string }) {
         <p className="text-sm text-neutral-500">Loading…</p>
       ) : (
         <div className="flex flex-col gap-4">
-          {mailboxes.length === 0 ? (
+          {connections.length === 0 ? (
             <p className="text-sm text-neutral-500">
-              You haven't connected a mailbox yet.{' '}
+              {emptyText}{' '}
               <Link to="/integrations" className="font-medium text-magenta-600 hover:underline">
-                Connect one
+                Set one up
               </Link>{' '}
               to link it here.
             </p>
           ) : (
             <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
-              {mailboxes.map((mailbox) => {
-                const linked = emailSources.some((s) => s.integrationId === mailbox.id);
-                const failed = mailbox.status !== 'connected';
+              {connections.map((connection) => {
+                const linked = typeSources.some((s) => s.integrationId === connection.id);
+                const failed = connection.status !== 'connected';
                 return (
-                  <li key={mailbox.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <li key={connection.id} className="flex items-center justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-ink">{mailbox.emailAddress}</p>
-                      <p className={`text-xs ${failed ? 'text-magenta-600' : 'text-neutral-500'}`}>
-                        {failed ? 'Sign-in failed — reconnect it on the Integrations page' : 'Inbox and sent mail'}
-                      </p>
+                      <p className="truncate text-sm font-medium text-ink">{connection.emailAddress || connection.name}</p>
+                      <p className={`text-xs ${failed ? 'text-magenta-600' : 'text-neutral-500'}`}>{failed ? failedText : connectedText}</p>
                     </div>
                     <ToggleSwitch
                       checked={linked}
-                      disabled={busyId === mailbox.id || (!linked && (atLimit || failed))}
-                      onToggle={() => handleToggle(mailbox)}
+                      disabled={busyId === connection.id || (!linked && (atLimit || failed))}
+                      onToggle={() => handleToggle(connection)}
                     />
                   </li>
                 );

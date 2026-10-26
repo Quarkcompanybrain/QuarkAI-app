@@ -3,7 +3,7 @@ const { softDeletePlugin } = require('../utils/softDeletePlugin');
 
 const chunkSchema = new Schema(
   {
-    sourceType: { type: String, enum: ['file', 'whatsapp', 'email'], default: 'file' },
+    sourceType: { type: String, enum: ['file', 'whatsapp', 'email', 'cheerio'], default: 'file' },
     fileId: { type: Schema.Types.ObjectId, ref: 'File', default: null }, // set when sourceType === 'file'
     orgId: { type: Schema.Types.ObjectId, ref: 'Org', required: true },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null }, // null => personal (file sources only)
@@ -33,6 +33,12 @@ const chunkSchema = new Schema(
       emailSubject: String,
       emailFrom: String,
       emailThreadKey: String,
+      // cheerio sourceType only (integrationId and messageTimestamp are shared):
+      cheerioEventId: { type: Schema.Types.ObjectId, ref: 'CheerioEvent' },
+      cheerioConnection: String,
+      cheerioChannel: String,
+      contactName: String,
+      contactPhone: String,
     },
   },
   { timestamps: true }

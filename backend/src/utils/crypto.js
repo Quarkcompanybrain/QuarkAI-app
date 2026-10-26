@@ -45,4 +45,9 @@ function decryptJson(encoded) {
   return JSON.parse(decrypt(encoded));
 }
 
-module.exports = { encrypt, decrypt, encryptJson, decryptJson };
+/** One-way hash for looking up a secret (e.g. a webhook URL token) without storing it in plaintext. */
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+module.exports = { encrypt, decrypt, encryptJson, decryptJson, hashToken };

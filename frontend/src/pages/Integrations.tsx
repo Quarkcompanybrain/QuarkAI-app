@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { integrationsApi, streamIntegrationStatus } from '../features/integrations/api';
 import { Card } from '../components/Card';
@@ -7,7 +7,8 @@ import { Input } from '../components/Input';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { ApiRequestError } from '../lib/api';
 import { PulseNode } from '../components/PulseNode';
-import { InfoIcon, MailIcon, PlugIcon } from '../components/icons';
+import { useClickOutside } from '../hooks/useClickOutside';
+import { CheckIcon, CopyIcon, InfoIcon, MailIcon, PlugIcon, WebhookIcon } from '../components/icons';
 import { FaWhatsapp } from 'react-icons/fa';
 import type { Integration } from '../types';
 
@@ -48,6 +49,42 @@ function InfoTooltip({ children }: { children: string }) {
   );
 }
 
+// Like InfoTooltip, but opens on click and stays open so its content
+// (steps, copy buttons) can be used.
+function HelpPopover({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, () => setOpen(false), open);
+
+  return (
+    <div ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
+        className="flex h-5 w-5 items-center justify-center rounded-full text-neutral-400 transition-colors hover:text-magenta-500"
+        aria-label={label}
+        aria-expanded={open}
+      >
+        <InfoIcon className="h-4 w-4" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute left-0 top-full z-20 mt-2 w-[min(24rem,calc(100vw-3rem))] rounded-xl border border-neutral-150 bg-white p-4 shadow-lg"
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export function Integrations() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [connecting, setConnecting] = useState(false);
@@ -57,6 +94,7 @@ export function Integrations() {
   const refresh = () => integrationsApi.list().then((r) => setIntegrations(r.integrations));
   const whatsappIntegrations = integrations.filter((i) => i.type === 'whatsapp');
   const emailIntegrations = integrations.filter((i) => i.type === 'email');
+  const cheerioIntegrations = integrations.filter((i) => i.type === 'cheerio');
 
   useEffect(() => {
     refresh();
@@ -173,6 +211,7 @@ export function Integrations() {
         </Card>
 
         <EmailCard mailboxes={emailIntegrations} onChanged={refresh} onDisconnect={handleDisconnect} />
+        <CheerioCard connections={cheerioIntegrations} onChanged={refresh} onDisconnect={handleDisconnect} />
       </div>
     </div>
   );
@@ -337,6 +376,186 @@ function EmailCard({
           {mailboxes.length ? 'Connect another mailbox' : 'Connect mailbox'}
         </Button>
       )}
+    </Card>
+  );
+}
+
+const MAX_CHEERIO_CONNECTIONS = 5;
+
+// The suggested body for Cheerio's "send webhook" step. The backend also
+// recognises common alternative field names, so it doesn't have to match exactly.
+const CHEERIO_BODY_TEMPLATE = `{
+  "event_id": "{{message_id}}",
+  "channel": "whatsapp",
+  "direction": "inbound",
+  "contact_name": "{{contact_name}}",
+  "contact_phone": "{{contact_phone}}",
+  "message": "{{message}}",
+  "timestamp": "{{timestamp}}"
+}`;
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-neutral-500 transition-colors hover:bg-neutral-50 hover:text-magenta-600"
+      aria-label={label}
+    >
+      {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+function CheerioSetupSteps() {
+  return (
+    <div>
+      <p className="mb-3 text-sm font-semibold text-ink">How to connect Cheerio</p>
+      <ol className="flex list-decimal flex-col gap-2 pl-5 text-sm leading-relaxed text-neutral-600 marker:text-neutral-400">
+        <li>
+          Click <b className="font-medium text-ink">Create connection</b> below, then <b className="font-medium text-ink">Copy</b> the link.
+        </li>
+        <li>
+          Open your project → <b className="font-medium text-ink">Settings</b> → turn on this connection under{' '}
+          <b className="font-medium text-ink">Cheerio sources</b>.
+        </li>
+        <li>
+          In Cheerio, open your workflow and add a <b className="font-medium text-ink">Send webhook</b> step.
+        </li>
+        <li>
+          Paste the link and choose <b className="font-medium text-ink">POST</b>.
+        </li>
+        <li>
+          Paste this as the body, then replace each <code className="text-xs">{'{{ }}'}</code> with the matching Cheerio field:
+          <div className="mt-2 overflow-hidden rounded-lg border border-neutral-150 bg-neutral-25">
+            <div className="flex justify-end border-b border-neutral-100 px-1 py-0.5">
+              <CopyButton value={CHEERIO_BODY_TEMPLATE} label="Copy body" />
+            </div>
+            <pre className="overflow-x-auto px-3 py-2 text-xs leading-relaxed text-ink">{CHEERIO_BODY_TEMPLATE}</pre>
+          </div>
+        </li>
+        <li>
+          Save the workflow and send a test message. When it works, this card shows{' '}
+          <b className="font-medium text-ink">Last event received</b>.
+        </li>
+      </ol>
+    </div>
+  );
+}
+
+function CheerioCard({
+  connections,
+  onChanged,
+  onDisconnect,
+}: {
+  connections: Integration[];
+  onChanged: () => void;
+  onDisconnect: (id: string) => Promise<void>;
+}) {
+  const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCreate = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await integrationsApi.connectCheerio({ name: name.trim() });
+      setName('');
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : 'Could not create the connection. Try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card className="sm:col-span-2">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-magenta-50 text-magenta-600">
+          <WebhookIcon className="h-5 w-5" />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <h2 className="font-display text-base font-semibold text-ink">Cheerio AI</h2>
+          <HelpPopover label="How to connect Cheerio">
+            <CheerioSetupSteps />
+          </HelpPopover>
+        </div>
+      </div>
+
+      <p className="mt-3 text-sm text-neutral-500">
+        Learn from your customer conversations in Cheerio. Click the ? icon for setup steps.
+      </p>
+
+      {connections.length > 0 && (
+        <ul className="mt-4 flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150">
+          {connections.map((connection) => (
+            <li key={connection.id} className="flex flex-col gap-2 px-4 py-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-ink">{connection.name}</p>
+                  <p className="text-xs text-neutral-500">
+                    {connection.lastEventAt
+                      ? `Last event received ${new Date(connection.lastEventAt).toLocaleString()}`
+                      : 'No events received yet'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => onDisconnect(connection.id)}
+                  className="shrink-0 text-xs font-medium text-neutral-500 transition-colors hover:text-magenta-500"
+                >
+                  Remove
+                </button>
+              </div>
+              {connection.webhookUrl && (
+                <div className="flex items-center gap-2 rounded-lg border border-neutral-150 bg-neutral-25 py-1 pl-3 pr-1">
+                  <code className="min-w-0 flex-1 truncate text-xs text-ink">{connection.webhookUrl}</code>
+                  <CopyButton value={connection.webhookUrl} label={`Copy webhook URL for ${connection.name}`} />
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {connections.length >= MAX_CHEERIO_CONNECTIONS ? (
+        <p className="mt-4 text-xs text-neutral-500">
+          {MAX_CHEERIO_CONNECTIONS} of {MAX_CHEERIO_CONNECTIONS} connections created. Remove one to add another.
+        </p>
+      ) : (
+        <form onSubmit={handleCreate} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex-1">
+            <Input
+              label="Connection name"
+              placeholder="e.g. Acme Cheerio account"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <Button type="submit" loading={submitting} className="gap-1.5">
+            <PlugIcon className="h-3.5 w-3.5" />
+            {connections.length ? 'Create another connection' : 'Create connection'}
+          </Button>
+        </form>
+      )}
+      {error && <p className="mt-3 text-sm text-magenta-600">{error}</p>}
+
     </Card>
   );
 }

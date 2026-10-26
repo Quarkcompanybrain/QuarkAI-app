@@ -16,6 +16,12 @@ const fileSchema = new Schema(
       default: 'pending',
     },
     failureReason: { type: String, default: null },
+    // Processing lease and retry state: a temporary AI failure puts the File
+    // back to pending with nextAttemptAt, and a lease that runs out (a crash
+    // mid-processing) is recovered by the file worker.
+    attempts: { type: Number, default: 0 },
+    nextAttemptAt: { type: Date, default: null },
+    processingExpiresAt: { type: Date, default: null },
     // Files arriving through a WhatsApp or email source still use the same
     // S3 and extraction pipeline as uploads, while retaining their source context.
     sourceType: { type: String, enum: ['upload', 'whatsapp', 'email'], default: 'upload' },
@@ -44,6 +50,7 @@ const fileSchema = new Schema(
 
 fileSchema.index({ orgId: 1, projectId: 1 });
 fileSchema.index({ orgId: 1, ownerId: 1 });
+fileSchema.index({ status: 1, nextAttemptAt: 1 });
 
 softDeletePlugin(fileSchema);
 

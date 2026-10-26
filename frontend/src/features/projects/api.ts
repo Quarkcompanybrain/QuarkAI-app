@@ -10,7 +10,7 @@ export interface ProjectMember {
 
 export interface WhatsAppMemoryChunk {
   id: string;
-  sourceType: 'whatsapp' | 'email';
+  sourceType: 'whatsapp' | 'email' | 'cheerio';
   text: string;
   chatName: string | null;
   chatJid: string | null;

@@ -3,13 +3,15 @@ const { softDeletePlugin } = require('../utils/softDeletePlugin');
 
 const chunkSchema = new Schema(
   {
-    sourceType: { type: String, enum: ['file', 'whatsapp', 'email'], default: 'file' },
+    sourceType: { type: String, enum: ['file', 'whatsapp', 'email', 'cheerio'], default: 'file' },
     fileId: { type: Schema.Types.ObjectId, ref: 'File', default: null }, // set when sourceType === 'file'
     orgId: { type: Schema.Types.ObjectId, ref: 'Org', required: true },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null }, // null => personal (file sources only)
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     text: { type: String, required: true },
-    embedding: { type: [Number], required: true }, // indexed by an Atlas Vector Search index (see docs/atlas-vector-index.json)
+    // The text's embedding as a BSON float32 vector (see toStoredVector),
+    // indexed by an Atlas Vector Search index (see docs/atlas-vector-index.json).
+    vector: { type: Buffer, subtype: 9, required: true },
     metadata: {
       filename: String,
       chunkIndex: Number,
@@ -33,6 +35,12 @@ const chunkSchema = new Schema(
       emailSubject: String,
       emailFrom: String,
       emailThreadKey: String,
+      // cheerio sourceType only (integrationId and messageTimestamp are shared):
+      cheerioEventId: { type: Schema.Types.ObjectId, ref: 'CheerioEvent' },
+      cheerioConnection: String,
+      cheerioChannel: String,
+      contactName: String,
+      contactPhone: String,
     },
   },
   { timestamps: true }

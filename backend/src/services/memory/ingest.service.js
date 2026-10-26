@@ -3,14 +3,15 @@ const { randomUUID } = require('crypto');
 const { openai } = require('../../config/openai');
 const env = require('../../config/env');
 const { buildIngestTools, executeIngestTool } = require('./tools');
+const { assertAiAvailable, noteAiError, shouldReport } = require('../../utils/aiErrors');
 
-const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document, a single chat message, a chronological batch of WhatsApp messages, or one email. Decide what to do with it:
+const SYSTEM_PROMPT = `You maintain a permanent knowledge base. You're given one candidate piece of content — it might be a chunk of an uploaded document, a single chat message, a chronological batch of WhatsApp messages, one email, or one Cheerio AI customer-conversation event. Decide what to do with it:
 
 1. Call search_memory first to check whether related or contradicting information is already stored.
 2. For a potentially useful WhatsApp message that depends on earlier discussion, call get_whatsapp_chat_context before deciding. Select focused query parameters (sender, direction, time range, type, reply, mention, text, or ingestion state) based on what you need to resolve. It only searches the same chat. Use it to resolve references, decisions, and updates; do not save a fragment that loses its meaning without that context.
 3. If this is new information worth remembering (a fact, decision, update, instruction, or detail someone might later search for), call save_memory with a self-contained version of it — rephrase only as needed for it to make sense on its own, keeping the original wording and context as much as possible. For a WhatsApp batch, include the recordId of every supporting message in sourceMessageIds, and combine messages only when they establish one coherent fact.
 4. If it updates or corrects something search_memory found, call edit_memory on that entry instead of creating a duplicate. For a WhatsApp batch, include the supporting recordIds in sourceMessageIds.
-5. For an email, save only its new content; any earlier thread messages shown are context and were already evaluated.
+5. For an email or a Cheerio event, save only its new content; any earlier thread or conversation messages shown are context and were already evaluated.
 6. If it has no lasting informational value (greetings, small talk, acknowledgements, emoji reactions, or something already fully captured), don't call save_memory or edit_memory at all — you're done.
 
 Respond only with tool calls, no commentary.`;
@@ -63,6 +64,7 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
   Sentry.logger.info('AI memory ingestion started', { traceId, provider: 'openai', model, orgId, projectId, ownerId, sourceType, fileId, metadata: ctx.metadata, projectContext, system, initialMessages: messages });
 
   try {
+    assertAiAvailable();
     for (let i = 0; i < 5; i++) {
       Sentry.logger.info('AI memory ingestion model request', { traceId, provider: 'openai', model, iteration: i + 1, messages });
       const response = await openai.chat.completions.create({
@@ -101,7 +103,8 @@ async function decideAndStore({ orgId, projectId, ownerId, sourceType, fileId, t
     Sentry.logger.info('AI memory ingestion completed', { traceId, provider: 'openai', model, outcome, finalMessages: messages });
     return outcome;
   } catch (err) {
-    Sentry.captureException(err, { tags: { pipeline: 'memory_ingest' }, extra: { traceId, orgId, projectId, sourceType, fileId, metadata: ctx.metadata, messages } });
+    noteAiError(err);
+    if (shouldReport(err)) Sentry.captureException(err, { tags: { pipeline: 'memory_ingest' }, extra: { traceId, orgId, projectId, sourceType, fileId, metadata: ctx.metadata, messages } });
     throw err;
   }
 }

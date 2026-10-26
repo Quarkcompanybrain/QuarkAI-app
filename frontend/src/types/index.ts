@@ -60,13 +60,17 @@ export type IntegrationStatus = 'pending' | 'connected' | 'disconnected' | 'fail
 
 export interface Integration {
   id: string;
-  type: 'whatsapp' | 'email';
+  type: 'whatsapp' | 'email' | 'cheerio';
   status: IntegrationStatus;
   phoneNumber: string | null;
   emailAddress?: string | null;
   lastConnectedAt: string | null;
   lastSyncedAt?: string | null;
   lastError?: string | null;
+  // Cheerio connections only
+  name?: string;
+  webhookUrl?: string;
+  lastEventAt?: string | null;
 }
 
 export interface WhatsAppChat {
@@ -87,7 +91,7 @@ export interface WhatsAppChat {
 
 export interface ProjectSource {
   id: string;
-  sourceType: 'whatsapp' | 'email';
+  sourceType: 'whatsapp' | 'email' | 'cheerio';
   integrationId: string;
   chatJid: string | null;
   chatName: string;

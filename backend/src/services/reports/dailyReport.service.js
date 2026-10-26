@@ -60,6 +60,10 @@ function memorySourceLabel(chunk) {
     if (chunk.metadata?.filename) return `email attachment "${chunk.metadata.filename}"`;
     return `email "${chunk.metadata?.emailSubject || '(no subject)'}"${chunk.metadata?.emailFrom ? ` from ${chunk.metadata.emailFrom}` : ''}`;
   }
+  if (chunk.sourceType === 'cheerio') {
+    const contact = chunk.metadata?.contactName || chunk.metadata?.contactPhone;
+    return `Cheerio${chunk.metadata?.cheerioChannel ? ` ${chunk.metadata.cheerioChannel}` : ''} conversation${contact ? ` with ${contact}` : ''}`;
+  }
   if (chunk.sourceType === 'whatsapp') {
     const sender = chunk.metadata?.senderName;
     const chat = chunk.metadata?.chatName;
@@ -81,7 +85,7 @@ async function collectOrgActivity(orgId, windowStart, windowEnd) {
       projectId: { $in: projectIds },
       $or: [{ createdAt: inWindow }, { updatedAt: inWindow }],
     })
-      .select('projectId sourceType text metadata.filename metadata.chatName metadata.senderName metadata.emailSubject metadata.emailFrom createdAt updatedAt')
+      .select('projectId sourceType text metadata.filename metadata.chatName metadata.senderName metadata.emailSubject metadata.emailFrom metadata.cheerioChannel metadata.contactName metadata.contactPhone createdAt updatedAt')
       .sort({ updatedAt: -1 })
       .lean(),
     File.find({ orgId, projectId: { $in: projectIds }, createdAt: inWindow })

@@ -27,6 +27,12 @@ async function ensureVectorIndex() {
   }
 
   if (existing.length > 0) {
+    const vectorField = existing[0].latestDefinition?.fields?.find((field) => field.type === 'vector');
+    if (vectorField?.path !== 'vector' || vectorField?.numDimensions !== env.openaiEmbeddingDimensions) {
+      // An index built for the old 1536-number `embedding` field matches nothing now.
+      console.error(`[db] Vector search index "${env.vectorIndexName}" indexes ${vectorField?.path} with ${vectorField?.numDimensions} dimensions, not vector with ${env.openaiEmbeddingDimensions}. Chat and memory search will find nothing until VECTOR_SEARCH_INDEX names a matching index.`);
+      return;
+    }
     console.log(`[db] Vector search index "${env.vectorIndexName}" already exists (${existing[0].status}).`);
     return;
   }
@@ -37,7 +43,7 @@ async function ensureVectorIndex() {
     type: 'vectorSearch',
     definition: {
       fields: [
-        { type: 'vector', path: 'embedding', numDimensions: 1536, similarity: 'cosine' },
+        { type: 'vector', path: 'vector', numDimensions: env.openaiEmbeddingDimensions, similarity: 'cosine' },
         { type: 'filter', path: 'orgId' },
         { type: 'filter', path: 'projectId' },
         { type: 'filter', path: 'ownerId' },

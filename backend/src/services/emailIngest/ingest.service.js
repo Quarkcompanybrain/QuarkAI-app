@@ -8,10 +8,9 @@ const File = require('../../models/File');
 const { decideAndStore } = require('../memory/ingest.service');
 const { splitFileIntoChunks } = require('../memory/split.service');
 const { processFile } = require('../processing/processFile');
+const { isAiPaused, nextRetry, shouldReport } = require('../../utils/aiErrors');
 
 const CLAIM_MS = 10 * 60 * 1000;
-const MAX_ATTEMPTS = 3;
-const RETRY_DELAY_MS = 60 * 1000;
 const MAX_UNSPLIT_EMAIL_CHARS = 8000;
 const THREAD_CONTEXT_MESSAGES = 3;
 const THREAD_CONTEXT_CHARS = 600;
@@ -129,7 +128,8 @@ async function ingestEmailForProject({ email, source, integration, project, trac
       const result = await processFile(file._id, { traceId });
       chunkIds.push(...(result.chunkIds || []));
     } catch {
-      // processFile marks the File failed and reports to Sentry; the email itself still counts as evaluated.
+      // processFile records the failure on the File (retrying it later when
+      // the error is temporary) and reports to Sentry; the email itself still counts as evaluated.
       failedFiles.push(attachment.filename);
     }
   }
@@ -206,14 +206,17 @@ async function processEntry(messageId, projectId) {
     });
     Sentry.logger.info('Email ingested for project', { traceId, messageId: String(messageId), projectId: String(projectId), chunkCount: chunkIds.length, fileCount: fileIds.length });
   } catch (err) {
-    const giveUp = entry.attempts >= MAX_ATTEMPTS;
+    const retry = nextRetry(err, entry.attempts);
     await finishEntry(messageId, projectId, claimId, {
-      status: giveUp ? 'failed' : 'pending',
+      status: retry ? 'pending' : 'failed',
       reason: err.message?.slice(0, 500) || 'Ingestion failed.',
-      nextAttemptAt: giveUp ? null : new Date(Date.now() + RETRY_DELAY_MS * entry.attempts),
-      processedAt: giveUp ? new Date() : null,
+      nextAttemptAt: retry?.at || null,
+      processedAt: retry ? null : new Date(),
+      ...(retry && !retry.countsAsAttempt ? { attempts: entry.attempts - 1 } : {}),
     });
-    Sentry.captureException(err, { tags: { pipeline: 'email_ingest' }, extra: { traceId, messageId: String(messageId), projectId: String(projectId), attempts: entry.attempts } });
+    if (shouldReport(err)) {
+      Sentry.captureException(err, { tags: { pipeline: 'email_ingest' }, extra: { traceId, messageId: String(messageId), projectId: String(projectId), attempts: entry.attempts, retryAt: retry?.at || null } });
+    }
   }
 }
 
@@ -242,6 +245,7 @@ async function processDueEmails() {
     await recoverExpiredClaims();
     // Bounded so one call can't monopolise the worker; the next poll continues.
     for (let round = 0; round < 10; round++) {
+      if (isAiPaused()) return;
       const now = new Date();
       const due = await EmailMessage.find({ projectIngestions: { $elemMatch: dueFilter(now) } })
         .sort({ sentAt: 1 })
@@ -251,6 +255,7 @@ async function processDueEmails() {
       if (!due.length) return;
       for (const message of due) {
         for (const entry of message.projectIngestions) {
+          if (isAiPaused()) return;
           if (entry.status === 'pending' && (!entry.nextAttemptAt || entry.nextAttemptAt <= now)) {
             await processEntry(message._id, entry.projectId);
           }

@@ -141,6 +141,10 @@ function createClient({ host, port, secure }, { user, pass }) {
     connectionTimeout: 20_000,
     greetingTimeout: 15_000,
     socketTimeout: 120_000,
+    // The EC2 host has no IPv6 route. Left to Node's dual-stack connect, a
+    // slow IPv4 attempt is abandoned for an unreachable IPv6 address and the
+    // sync fails, so mail servers are always reached over IPv4.
+    tls: { family: 4 },
   });
 }
 

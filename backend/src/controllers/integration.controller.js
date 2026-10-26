@@ -1,12 +1,29 @@
 const Sentry = require('@sentry/node');
+const crypto = require('crypto');
 const Integration = require('../models/Integration');
 const ProjectSource = require('../models/ProjectSource');
 const WhatsAppChat = require('../models/WhatsAppChat');
 const { connectIntegration, disconnectIntegration, subscribe } = require('../services/whatsapp/connectionManager');
 const { resolveImapServer, inspectMailbox } = require('../services/emailIngest/imap');
-const { encryptJson } = require('../utils/crypto');
+const { encryptJson, decryptJson, hashToken } = require('../utils/crypto');
+const env = require('../config/env');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
+
+function cheerioWebhookUrl(req, token) {
+  // Behind Nginx the request itself is plain HTTP, so PUBLIC_API_URL should be set in production.
+  const base = env.publicApiUrl || `${req.get('x-forwarded-proto') || req.protocol}://${req.get('host')}/api`;
+  return `${base}/webhooks/cheerio/${token}`;
+}
+
+function cheerioDetails(req, integration) {
+  if (integration.type !== 'cheerio' || !integration.credsEncrypted) return {};
+  return {
+    name: integration.cheerio?.name || 'Cheerio',
+    webhookUrl: cheerioWebhookUrl(req, decryptJson(integration.credsEncrypted).webhookToken),
+    lastEventAt: integration.cheerio?.lastEventAt || null,
+  };
+}
 
 const listIntegrations = asyncHandler(async (req, res) => {
   const integrations = await Integration.find({ userId: req.user.id });
@@ -17,6 +34,7 @@ const listIntegrations = asyncHandler(async (req, res) => {
       status: i.status,
       phoneNumber: i.phoneNumber,
       emailAddress: i.emailAddress,
+      ...cheerioDetails(req, i),
       lastConnectedAt: i.lastConnectedAt,
       lastSyncedAt: i.email?.lastSyncedAt || null,
       lastError: i.lastError,
@@ -114,6 +132,31 @@ const connectEmail = asyncHandler(async (req, res) => {
   res.status(201).json({ integration: { id: integration._id, type: 'email', status: integration.status, emailAddress } });
 });
 
+const MAX_CHEERIO_CONNECTIONS_PER_USER = 5;
+
+// A Cheerio connection is just a secret webhook URL: the customer adds a
+// "send webhook" step to their Cheerio workflows that posts to it.
+const connectCheerio = asyncHandler(async (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 80) || 'Cheerio';
+  const count = await Integration.countDocuments({ userId: req.user.id, type: 'cheerio' });
+  if (count >= MAX_CHEERIO_CONNECTIONS_PER_USER) {
+    throw new ApiError(409, `You can create up to ${MAX_CHEERIO_CONNECTIONS_PER_USER} Cheerio connections. Remove one to add another.`);
+  }
+
+  const webhookToken = crypto.randomBytes(24).toString('base64url');
+  const integration = await Integration.create({
+    userId: req.user.id,
+    type: 'cheerio',
+    status: 'connected',
+    credsEncrypted: encryptJson({ webhookToken }),
+    cheerio: { name, webhookTokenHash: hashToken(webhookToken) },
+    lastConnectedAt: new Date(),
+  });
+
+  Sentry.logger.info('Cheerio integration created', { integrationId: String(integration._id), userId: req.user.id });
+  res.status(201).json({ integration: { id: integration._id, type: 'cheerio', status: integration.status, ...cheerioDetails(req, integration) } });
+});
+
 const disconnectIntegrationHandler = asyncHandler(async (req, res) => {
   const integration = await Integration.findOne({ _id: req.params.id, userId: req.user.id });
   if (!integration) throw new ApiError(404, 'Integration not found.');
@@ -123,6 +166,8 @@ const disconnectIntegrationHandler = asyncHandler(async (req, res) => {
   } else {
     integration.status = 'disconnected';
     integration.credsEncrypted = null;
+    // Stops the webhook URL from accepting events immediately.
+    if (integration.type === 'cheerio') integration.cheerio.webhookTokenHash = null;
   }
   const disconnectedAt = new Date();
   const [sourceCleanup] = await Promise.all([
@@ -167,4 +212,4 @@ const listChats = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listIntegrations, connectWhatsapp, connectEmail, streamStatus, disconnectIntegration: disconnectIntegrationHandler, listChats };
+module.exports = { listIntegrations, connectWhatsapp, connectEmail, connectCheerio, streamStatus, disconnectIntegration: disconnectIntegrationHandler, listChats };

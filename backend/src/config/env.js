@@ -14,7 +14,9 @@ module.exports = {
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
 
   mongodbUri: process.env.MONGODB_URI,
-  vectorIndexName: process.env.VECTOR_INDEX_NAME || 'chunk_vector_index',
+  // Renamed from VECTOR_INDEX_NAME when vectors moved to 512 dimensions, so a
+  // leftover setting can't point search at the old 1536-dimension index.
+  vectorIndexName: process.env.VECTOR_SEARCH_INDEX || 'chunk_vector_index_512',
 
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
@@ -34,13 +36,23 @@ module.exports = {
 
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
+  // text-embedding-3 models can return shortened vectors; 512 keeps search
+  // quality close to the full 1536 at a third of the size. Changing it means
+  // re-embedding every chunk and rebuilding the vector index.
+  openaiEmbeddingDimensions: Number(process.env.OPENAI_EMBEDDING_DIMENSIONS) || 512,
   openaiIngestionModel: process.env.OPENAI_INGESTION_MODEL || 'gpt-5.4-nano',
   whatsappIngestionBatchWindowMs: Number(process.env.WHATSAPP_INGESTION_BATCH_WINDOW_MS) || 300_000,
   whatsappIngestionBatchMaxMessages: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_MESSAGES) || 30,
   whatsappIngestionBatchMaxChars: Number(process.env.WHATSAPP_INGESTION_BATCH_MAX_CHARS) || 12_000,
   emailSyncPollMs: Number(process.env.EMAIL_SYNC_POLL_MS) || 120_000,
   emailIngestionPollMs: Number(process.env.EMAIL_INGESTION_POLL_MS) || 15_000,
+  cheerioIngestionPollMs: Number(process.env.CHEERIO_INGESTION_POLL_MS) || 15_000,
+  // Public base URL of this API (ending in /api), used to build the Cheerio
+  // webhook URLs shown to users. Without it, the request's own host is used.
+  publicApiUrl: process.env.PUBLIC_API_URL ? process.env.PUBLIC_API_URL.replace(/\/+$/, '') : null,
   whatsappIngestionBatchPollMs: Number(process.env.WHATSAPP_INGESTION_BATCH_POLL_MS) || 15_000,
+  // Messages from chats that no project uses are deleted after this many days.
+  whatsappUnlinkedMessageRetentionDays: Number(process.env.WHATSAPP_UNLINKED_MESSAGE_RETENTION_DAYS) || 30,
 
   // Daily brief emailed to org admins. Sent once per org per local date, at or
   // after DAILY_REPORT_HOUR in DAILY_REPORT_TIMEZONE.

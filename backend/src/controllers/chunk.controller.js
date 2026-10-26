@@ -1,6 +1,6 @@
 const Sentry = require('@sentry/node');
 const Chunk = require('../models/Chunk');
-const { embedText } = require('../services/embeddings/openai.service');
+const { embedText, toStoredVector } = require('../services/embeddings/openai.service');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
@@ -13,7 +13,7 @@ const updateProjectChunk = asyncHandler(async (req, res) => {
   if (!chunk) throw new ApiError(404, 'Knowledge entry not found.');
 
   chunk.text = text;
-  chunk.embedding = await embedText(text, { operation: 'project_chunk_admin_edit', projectId: req.projectId, chunkId: String(chunk._id), userId: req.user.id });
+  chunk.vector = toStoredVector(await embedText(text, { operation: 'project_chunk_admin_edit', projectId: req.projectId, chunkId: String(chunk._id), userId: req.user.id }));
   await chunk.save();
 
   Sentry.logger.info('Project knowledge entry updated', { projectId: req.projectId, chunkId: String(chunk._id), userId: req.user.id });

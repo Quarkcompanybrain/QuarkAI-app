@@ -11,6 +11,7 @@ router.use(requireAuth);
 router.get('/', ctrl.listIntegrations);
 router.post('/whatsapp/connect', ctrl.connectWhatsapp);
 router.post('/email/connect', ctrl.connectEmail);
+router.post('/cheerio/connect', ctrl.connectCheerio);
 router.get('/:id/stream', ctrl.streamStatus);
 router.get('/:id/chats', ctrl.listChats);
 router.delete('/:id', ctrl.disconnectIntegration);

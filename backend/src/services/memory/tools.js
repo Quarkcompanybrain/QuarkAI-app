@@ -1,7 +1,7 @@
 const Sentry = require('@sentry/node');
 const Chunk = require('../../models/Chunk');
 const WhatsAppMessage = require('../../models/WhatsAppMessage');
-const { embedText } = require('../embeddings/openai.service');
+const { embedText, toStoredVector } = require('../embeddings/openai.service');
 const { insertChunks, searchChunks } = require('../vectorstore/atlas.service');
 
 // Shared by both the ingestion decision loop (memory/ingest.service.js) and
@@ -224,7 +224,7 @@ async function executeIngestTool(name, input, ctx) {
   if (name === 'save_memory') {
     Sentry.logger.info('AI memory save started', { traceId, input, sourceType: ctx.sourceType, orgId: ctx.orgId, projectId: ctx.projectId, fileId: ctx.fileId, metadata: ctx.metadata });
     const sourceMessageIds = sourceMessageIdsForTool(input, ctx);
-    const embedding = await embedText(input.text, { traceId, operation: 'memory_save' });
+    const vector = toStoredVector(await embedText(input.text, { traceId, operation: 'memory_save' }));
     const [doc] = await insertChunks([
       {
         sourceType: ctx.sourceType,
@@ -233,7 +233,7 @@ async function executeIngestTool(name, input, ctx) {
         projectId: ctx.projectId,
         ownerId: ctx.ownerId,
         text: input.text,
-        embedding,
+        vector,
         metadata: {
           ...ctx.metadata,
           sourceMessageId: sourceMessageIds[0] || ctx.metadata?.sourceMessageId,
@@ -249,14 +249,14 @@ async function executeIngestTool(name, input, ctx) {
   if (name === 'edit_memory') {
     Sentry.logger.info('AI memory edit started', { traceId, input, orgId: ctx.orgId, projectId: ctx.projectId, ownerId: ctx.ownerId });
     const sourceMessageIds = sourceMessageIdsForTool(input, ctx);
-    const embedding = await embedText(input.text, { traceId, operation: 'memory_edit' });
+    const vector = toStoredVector(await embedText(input.text, { traceId, operation: 'memory_edit' }));
     const scopeFilter = ctx.projectId
       ? { projectId: ctx.projectId }
       : { projectId: null, ownerId: ctx.ownerId };
     const updated = await Chunk.findOneAndUpdate(
       { _id: input.chunkId, orgId: ctx.orgId, deletedAt: null, ...scopeFilter },
       {
-        $set: { text: input.text, embedding },
+        $set: { text: input.text, vector },
         ...(sourceMessageIds.length ? { $addToSet: { 'metadata.sourceMessageIds': { $each: sourceMessageIds } } } : {}),
       }
     );

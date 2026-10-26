@@ -33,6 +33,8 @@ const integrationSchema = new Schema(
       secure: { type: Boolean, default: true },
       folders: { type: [emailFolderSchema], default: [] },
       lastSyncedAt: { type: Date, default: null },
+      // Network failures in a row; a one-off timeout isn't worth an alert.
+      consecutiveFailures: { type: Number, default: 0 },
       // Sync lease, so only one PM2 process polls a mailbox at a time.
       syncLockId: { type: String, default: null },
       syncLockedUntil: { type: Date, default: null },

@@ -10,8 +10,8 @@ async function insertChunks(chunkDocs) {
 /**
  * Runs an Atlas Vector Search $vectorSearch query, scoped per the isolation
  * model: orgId always, then either projectId (project scope) or ownerId
- * (personal scope) — never both. Requires the `chunk_vector_index` Atlas
- * Search index (see docs/atlas-vector-index.json) with `embedding` indexed
+ * (personal scope) — never both. Requires the VECTOR_SEARCH_INDEX Atlas
+ * Search index (see docs/atlas-vector-index.json) with `vector` indexed
  * as the vector field and orgId/projectId/ownerId/deletedAt as filter fields.
  */
 async function searchChunks({ queryEmbedding, orgId, scope, projectId, ownerId, topK = 8 }) {
@@ -27,7 +27,7 @@ async function searchChunks({ queryEmbedding, orgId, scope, projectId, ownerId, 
     {
       $vectorSearch: {
         index: env.vectorIndexName,
-        path: 'embedding',
+        path: 'vector',
         queryVector: queryEmbedding,
         numCandidates: topK * 15,
         limit: topK,

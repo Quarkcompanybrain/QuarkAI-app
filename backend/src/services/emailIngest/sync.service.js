@@ -19,6 +19,15 @@ const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
 const OVERSIZED_PREVIEW_BYTES = 256 * 1024;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_TEXT_CHARS = 100_000;
+const NETWORK_FAILURES_BEFORE_ALERT = 3;
+const NETWORK_ERROR_CODES = new Set(['ETIMEDOUT', 'ETIMEOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'EAI_AGAIN', 'EPIPE', 'NoConnection']);
+
+function isNetworkError(err) {
+  if (err?.authenticationFailed) return false;
+  // A dual-stack connect failure arrives as an AggregateError of per-address errors.
+  if (err instanceof AggregateError) return err.errors.every(isNetworkError);
+  return NETWORK_ERROR_CODES.has(err?.code) || /socket timeout|connection timeout|timed out/i.test(err?.message || '');
+}
 const SYNC_CONCURRENCY = 4;
 const SUPPORTED_ATTACHMENT_MIME_TYPES = new Set(SUPPORTED_MIME_TYPES);
 // Mail clients often send real documents as application/octet-stream.
@@ -263,12 +272,20 @@ async function syncIntegration(integrationId) {
     } finally {
       await client.logout().catch(() => client.close());
     }
-    Object.assign(update, { 'email.lastSyncedAt': new Date(), lastError: null });
+    Object.assign(update, { 'email.lastSyncedAt': new Date(), 'email.consecutiveFailures': 0, lastError: null });
   } catch (err) {
     update.lastError = friendlyImapError(err).slice(0, 500);
     // A rejected password won't fix itself; stop polling until the user reconnects.
     if (err?.authenticationFailed) update.status = 'failed';
-    Sentry.captureException(err, { tags: { pipeline: 'email_sync' }, extra: { traceId, integrationId: String(integrationId) } });
+    // Mail servers time out now and then and the next poll recovers, so a
+    // network error is only reported once it has failed several polls in a row.
+    const failures = (integration.email?.consecutiveFailures || 0) + 1;
+    update['email.consecutiveFailures'] = failures;
+    if (!isNetworkError(err) || failures === NETWORK_FAILURES_BEFORE_ALERT) {
+      Sentry.captureException(err, { tags: { pipeline: 'email_sync' }, extra: { traceId, integrationId: String(integrationId), consecutiveFailures: failures } });
+    } else {
+      Sentry.logger.warn('IMAP sync failed with a network error; retrying on the next poll', { traceId, integrationId: String(integrationId), error: err.message, consecutiveFailures: failures });
+    }
   } finally {
     await Integration.updateOne(
       { _id: integrationId, 'email.syncLockId': lockId },

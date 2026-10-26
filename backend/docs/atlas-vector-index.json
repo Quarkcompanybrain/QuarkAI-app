@@ -1,10 +1,10 @@
 {
-  "_comment": "Create this as an Atlas Search index (type: vectorSearch) on the `chunks` collection, named to match VECTOR_INDEX_NAME in .env (default: chunk_vector_index). Atlas UI: Database > your cluster > Search > Create Search Index > JSON Editor.",
+  "_comment": "Create this as an Atlas Search index (type: vectorSearch) on the `chunks` collection, named to match VECTOR_SEARCH_INDEX in .env (default: chunk_vector_index_512). The server creates it on startup if missing. Atlas UI: Database > your cluster > Search > Create Search Index > JSON Editor.",
   "fields": [
     {
       "type": "vector",
-      "path": "embedding",
-      "numDimensions": 1536,
+      "path": "vector",
+      "numDimensions": 512,
       "similarity": "cosine"
     },
     { "type": "filter", "path": "orgId" },

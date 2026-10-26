@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { integrationsApi, streamIntegrationStatus } from '../features/integrations/api';
 import { Card } from '../components/Card';
@@ -7,6 +7,7 @@ import { Input } from '../components/Input';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { ApiRequestError } from '../lib/api';
 import { PulseNode } from '../components/PulseNode';
+import { useClickOutside } from '../hooks/useClickOutside';
 import { CheckIcon, CopyIcon, InfoIcon, MailIcon, PlugIcon, WebhookIcon } from '../components/icons';
 import { FaWhatsapp } from 'react-icons/fa';
 import type { Integration } from '../types';
@@ -41,6 +42,42 @@ function InfoTooltip({ children }: { children: string }) {
               <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-400" />
               <p className="text-xs leading-relaxed text-neutral-500">{children}</p>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// Like InfoTooltip, but opens on click and stays open so its content
+// (steps, copy buttons) can be used.
+function HelpPopover({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, () => setOpen(false), open);
+
+  return (
+    <div ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
+        className="flex h-5 w-5 items-center justify-center rounded-full text-neutral-400 transition-colors hover:text-magenta-500"
+        aria-label={label}
+        aria-expanded={open}
+      >
+        <InfoIcon className="h-4 w-4" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute left-0 top-full z-20 mt-2 w-[min(24rem,calc(100vw-3rem))] rounded-xl border border-neutral-150 bg-white p-4 shadow-lg"
+          >
+            {children}
           </motion.div>
         )}
       </AnimatePresence>
@@ -385,59 +422,37 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 
 function CheerioSetupSteps() {
   return (
-    <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm leading-relaxed text-neutral-600 marker:font-medium marker:text-neutral-400">
-      <li>
-        <span className="font-medium text-ink">Create a connection</span> below and copy its webhook URL. Keep the URL
-        private: anyone who has it can send content into your linked projects.
-      </li>
-      <li>
-        <span className="font-medium text-ink">Link it to your projects</span> in each project's{' '}
-        <span className="font-medium text-ink">Settings → Cheerio sources</span>. Events that arrive before a project is
-        linked are acknowledged but not saved.
-      </li>
-      <li>
-        <span className="font-medium text-ink">Open the workflow in Cheerio.</span> Sign in at{' '}
-        <a href="https://app.cheerio.in" target="_blank" rel="noreferrer" className="font-medium text-magenta-600 hover:underline">
-          app.cheerio.in
-        </a>
-        , go to your workflows (the flow builder) and open the flow Quark AI should learn from, for example the one that runs
-        on every incoming WhatsApp message or on campaign replies.
-      </li>
-      <li>
-        <span className="font-medium text-ink">Add a "Send webhook" step</span> where it should fire. Placing it right
-        after the trigger sends every message that starts the flow.
-      </li>
-      <li>
-        <span className="font-medium text-ink">Configure the request:</span> method <code className="rounded bg-neutral-50 px-1 text-xs">POST</code>,
-        URL set to your webhook URL, and, if Cheerio asks for headers,{' '}
-        <code className="rounded bg-neutral-50 px-1 text-xs">Content-Type: application/json</code>.
-      </li>
-      <li>
-        <span className="font-medium text-ink">Paste this body</span>, then replace each{' '}
-        <code className="rounded bg-neutral-50 px-1 text-xs">{'{{…}}'}</code> with the matching variable from Cheerio's
-        variable picker (contact name, phone number, message text, message ID, time). Delete a line if Cheerio has no
-        matching variable. Set <code className="rounded bg-neutral-50 px-1 text-xs">channel</code> to the flow's channel, and{' '}
-        <code className="rounded bg-neutral-50 px-1 text-xs">direction</code> to{' '}
-        <code className="rounded bg-neutral-50 px-1 text-xs">inbound</code> for customer messages or{' '}
-        <code className="rounded bg-neutral-50 px-1 text-xs">outbound</code> for your team's or bot's replies.
-        <div className="mt-2 overflow-hidden rounded-lg border border-neutral-150 bg-white">
-          <div className="flex items-center justify-between border-b border-neutral-100 px-3 py-1.5">
-            <span className="text-xs font-medium text-neutral-500">Request body (JSON)</span>
-            <CopyButton value={CHEERIO_BODY_TEMPLATE} label="Copy request body" />
+    <div>
+      <p className="mb-3 text-sm font-semibold text-ink">How to connect Cheerio</p>
+      <ol className="flex list-decimal flex-col gap-2 pl-5 text-sm leading-relaxed text-neutral-600 marker:text-neutral-400">
+        <li>
+          Click <b className="font-medium text-ink">Create connection</b> below, then <b className="font-medium text-ink">Copy</b> the link.
+        </li>
+        <li>
+          Open your project → <b className="font-medium text-ink">Settings</b> → turn on this connection under{' '}
+          <b className="font-medium text-ink">Cheerio sources</b>.
+        </li>
+        <li>
+          In Cheerio, open your workflow and add a <b className="font-medium text-ink">Send webhook</b> step.
+        </li>
+        <li>
+          Paste the link and choose <b className="font-medium text-ink">POST</b>.
+        </li>
+        <li>
+          Paste this as the body, then replace each <code className="text-xs">{'{{ }}'}</code> with the matching Cheerio field:
+          <div className="mt-2 overflow-hidden rounded-lg border border-neutral-150 bg-neutral-25">
+            <div className="flex justify-end border-b border-neutral-100 px-1 py-0.5">
+              <CopyButton value={CHEERIO_BODY_TEMPLATE} label="Copy body" />
+            </div>
+            <pre className="overflow-x-auto px-3 py-2 text-xs leading-relaxed text-ink">{CHEERIO_BODY_TEMPLATE}</pre>
           </div>
-          <pre className="overflow-x-auto px-3 py-2 text-xs leading-relaxed text-ink">{CHEERIO_BODY_TEMPLATE}</pre>
-        </div>
-      </li>
-      <li>
-        <span className="font-medium text-ink">Save and publish the flow</span>, then send a test message through it. Within a
-        few seconds this card shows when the last event was received. Opening the webhook URL in a browser also confirms it's
-        active.
-      </li>
-      <li>
-        <span className="font-medium text-ink">Repeat in every flow</span> that should feed Quark AI. All your flows can share one
-        connection. To revoke a URL, remove the connection and create a new one.
-      </li>
-    </ol>
+        </li>
+        <li>
+          Save the workflow and send a test message. When it works, this card shows{' '}
+          <b className="font-medium text-ink">Last event received</b>.
+        </li>
+      </ol>
+    </div>
   );
 }
 
@@ -453,9 +468,6 @@ function CheerioCard({
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [stepsOpen, setStepsOpen] = useState<boolean | null>(null);
-  // Setup steps stay open until a connection has received its first event.
-  const showSteps = stepsOpen ?? !connections.some((connection) => connection.lastEventAt);
 
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
@@ -480,16 +492,14 @@ function CheerioCard({
         </div>
         <div className="flex items-center gap-1.5">
           <h2 className="font-display text-base font-semibold text-ink">Cheerio AI</h2>
-          <InfoTooltip>
-            Cheerio sends events to Quark AI from a "Send webhook" step in your Cheerio workflows. Quark AI only receives what
-            those steps send, and never writes anything back to Cheerio.
-          </InfoTooltip>
+          <HelpPopover label="How to connect Cheerio">
+            <CheerioSetupSteps />
+          </HelpPopover>
         </div>
       </div>
 
       <p className="mt-3 text-sm text-neutral-500">
-        Learn from customer conversations in Cheerio (WhatsApp Business, SMS, email, Instagram and more). Create a connection,
-        add its webhook URL to your Cheerio workflows, then choose which projects it feeds in project settings.
+        Learn from your customer conversations in Cheerio. Click the ? icon for setup steps.
       </p>
 
       {connections.length > 0 && (
@@ -546,26 +556,6 @@ function CheerioCard({
       )}
       {error && <p className="mt-3 text-sm text-magenta-600">{error}</p>}
 
-      <div className="mt-5 border-t border-neutral-100 pt-4">
-        <button
-          type="button"
-          onClick={() => setStepsOpen(!showSteps)}
-          className="text-sm font-medium text-ink hover:text-magenta-600"
-          aria-expanded={showSteps}
-        >
-          {showSteps ? 'Hide setup steps' : 'How to set up the webhook in Cheerio'}
-        </button>
-        {showSteps && (
-          <div className="mt-3">
-            <CheerioSetupSteps />
-            <p className="mt-3 text-xs text-neutral-500">
-              Button and menu names in Cheerio's flow builder may differ slightly from these steps. Field names don't have to
-              match the template exactly: Quark AI also recognises names like <code>name</code>, <code>phone</code>,{' '}
-              <code>text</code> and <code>body</code>, and keeps any other fields as plain text.
-            </p>
-          </div>
-        )}
-      </div>
     </Card>
   );
 }

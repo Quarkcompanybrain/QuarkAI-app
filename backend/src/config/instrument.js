@@ -4,8 +4,13 @@ require('dotenv').config();
 
 const Sentry = require('@sentry/node');
 const { nodeProfilingIntegration } = require('@sentry/profiling-node');
+const { createErrorBudget } = require('./sentryBudget');
 
 const isProd = process.env.NODE_ENV === 'production';
+const allowError = createErrorBudget({
+  perErrorPerHour: Number(process.env.SENTRY_MAX_EVENTS_PER_ERROR_PER_HOUR) || 2,
+  totalPerHour: Number(process.env.SENTRY_MAX_ERRORS_PER_HOUR) || 6,
+});
 
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
@@ -13,6 +18,9 @@ Sentry.init({
   enabled: Boolean(process.env.SENTRY_DSN),
 
   integrations: [nodeProfilingIntegration()],
+
+  // Drops repeats of the same error before they count against the error quota.
+  beforeSend: (event) => (allowError(event) ? event : null),
 
   // Send structured logs to Sentry (Sentry.logger.*)
   enableLogs: true,

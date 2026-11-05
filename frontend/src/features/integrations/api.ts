@@ -13,6 +13,8 @@ export const integrationsApi = {
 
   disconnect: (id: string) => api.delete<{ message: string }>(`/integrations/${id}`),
 
+  getGoogleWorkspace: () => api.get<{ configured: boolean; serviceAccountEmail: string | null }>('/integrations/google'),
+
   listChats: (id: string) => api.get<{ chats: WhatsAppChat[] }>(`/integrations/${id}/chats`),
 };
 

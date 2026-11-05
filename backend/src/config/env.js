@@ -61,6 +61,10 @@ module.exports = {
   dailyReportTimezone: process.env.DAILY_REPORT_TIMEZONE || 'Asia/Kolkata',
   dailyReportPollMs: Number(process.env.DAILY_REPORT_POLL_MS) || 300_000,
 
+  // Base64 of the Google service account's JSON key; enables the chat's
+  // Google Sheets/Docs tools. Users share files with that account's email.
+  googleServiceAccountKeyBase64: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64 || null,
+
   sentryDsn: process.env.SENTRY_DSN,
 
   integrationEncryptionKey: process.env.INTEGRATION_ENCRYPTION_KEY,

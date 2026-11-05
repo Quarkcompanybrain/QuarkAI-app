@@ -100,6 +100,8 @@ pm2 restart <backend-app-name> --update-env
 
   **⚠️ WhatsApp risk**: Baileys automates WhatsApp Web, which is against WhatsApp's Terms of Service and carries a real risk of the connected number being flagged or banned. The Integrations page shows this warning to users; consider using a spare/secondary number rather than a primary line, in dev and in production.
 
+- Google Sheets & Docs in chat: paste a Sheet or Doc link and the chat AI can read it, and append/overwrite sheet cells or append/replace doc text when asked. Access goes through one server-wide Google service account (`GOOGLE_SERVICE_ACCOUNT_KEY_BASE64`): users share each file with its email (Viewer to read, Editor to change), shown on the Integrations page. The AI can only open links the user pasted in that chat, and the first org to use a file claims it, so other orgs that obtain the link are refused.
+
 ## On hold
 
 - **Email reply drafting**: deciding whether a new email deserves a reply, drafting one from project memory, and saving it as a draft in the user's mailbox. Paused until email ingestion has run in production for a while. With IMAP, a draft can be saved by appending to the Drafts folder with `In-Reply-To`/`References` headers so it threads correctly.

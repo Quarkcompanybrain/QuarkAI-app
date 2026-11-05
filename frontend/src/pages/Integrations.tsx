@@ -10,6 +10,7 @@ import { PulseNode } from '../components/PulseNode';
 import { useClickOutside } from '../hooks/useClickOutside';
 import { CheckIcon, CopyIcon, InfoIcon, MailIcon, PlugIcon, WebhookIcon } from '../components/icons';
 import { FaWhatsapp } from 'react-icons/fa';
+import { SiGooglesheets } from 'react-icons/si';
 import type { Integration } from '../types';
 
 function InfoTooltip({ children }: { children: string }) {
@@ -212,6 +213,7 @@ export function Integrations() {
 
         <EmailCard mailboxes={emailIntegrations} onChanged={refresh} onDisconnect={handleDisconnect} />
         <CheerioCard connections={cheerioIntegrations} onChanged={refresh} onDisconnect={handleDisconnect} />
+        <GoogleWorkspaceCard />
       </div>
     </div>
   );
@@ -556,6 +558,50 @@ function CheerioCard({
       )}
       {error && <p className="mt-3 text-sm text-magenta-600">{error}</p>}
 
+    </Card>
+  );
+}
+
+// Nothing to connect per user: the server's Google service account opens any
+// Sheet or Doc that is shared with its email, so this card shows that email.
+function GoogleWorkspaceCard() {
+  const [state, setState] = useState<{ configured: boolean; serviceAccountEmail: string | null } | null>(null);
+
+  useEffect(() => {
+    integrationsApi
+      .getGoogleWorkspace()
+      .then(setState)
+      .catch(() => setState({ configured: false, serviceAccountEmail: null }));
+  }, []);
+
+  return (
+    <Card className="sm:col-span-2">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-magenta-50 text-magenta-600">
+          <SiGooglesheets className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <h2 className="font-display text-base font-semibold text-ink">Google Sheets & Docs</h2>
+      </div>
+      <p className="mt-3 text-sm text-neutral-500">
+        Paste a Google Sheet or Doc link in chat and Quark AI can read it, and update it when you ask.
+      </p>
+      {state === null ? null : state.configured && state.serviceAccountEmail ? (
+        <>
+          <p className="mt-4 text-sm text-ink">
+            First, share the file with this address — <span className="font-medium">Viewer</span> to let Quark read it,{' '}
+            <span className="font-medium">Editor</span> to let it make changes:
+          </p>
+          <div className="mt-2 flex items-center gap-2 rounded-lg border border-neutral-150 bg-neutral-25 py-1 pl-3 pr-1">
+            <code className="min-w-0 flex-1 truncate text-xs text-ink">{state.serviceAccountEmail}</code>
+            <CopyButton value={state.serviceAccountEmail} label="Copy Quark's Google address" />
+          </div>
+          <p className="mt-2 text-xs text-neutral-500">
+            A file can be used by one organization in Quark: the first to use it.
+          </p>
+        </>
+      ) : (
+        <p className="mt-4 text-xs text-neutral-500">Not set up on this server yet.</p>
+      )}
     </Card>
   );
 }

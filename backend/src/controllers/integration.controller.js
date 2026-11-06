@@ -7,6 +7,7 @@ const { connectIntegration, disconnectIntegration, subscribe } = require('../ser
 const { resolveImapServer, inspectMailbox } = require('../services/emailIngest/imap');
 const { encryptJson, decryptJson, hashToken } = require('../utils/crypto');
 const env = require('../config/env');
+const { serviceAccountEmail } = require('../services/google/workspace.service');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
 
@@ -157,6 +158,13 @@ const connectCheerio = asyncHandler(async (req, res) => {
   res.status(201).json({ integration: { id: integration._id, type: 'cheerio', status: integration.status, ...cheerioDetails(req, integration) } });
 });
 
+// Google Sheets/Docs aren't connected per user: the server's service account
+// reads and writes any file a user shares with it, so the UI just needs its email.
+const getGoogleWorkspace = asyncHandler(async (req, res) => {
+  const email = serviceAccountEmail();
+  res.json({ configured: Boolean(email), serviceAccountEmail: email });
+});
+
 const disconnectIntegrationHandler = asyncHandler(async (req, res) => {
   const integration = await Integration.findOne({ _id: req.params.id, userId: req.user.id });
   if (!integration) throw new ApiError(404, 'Integration not found.');
@@ -212,4 +220,4 @@ const listChats = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listIntegrations, connectWhatsapp, connectEmail, connectCheerio, streamStatus, disconnectIntegration: disconnectIntegrationHandler, listChats };
+module.exports = { getGoogleWorkspace, listIntegrations, connectWhatsapp, connectEmail, connectCheerio, streamStatus, disconnectIntegration: disconnectIntegrationHandler, listChats };

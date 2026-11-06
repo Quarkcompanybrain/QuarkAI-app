@@ -9,6 +9,7 @@ const router = Router();
 router.use(requireAuth);
 
 router.get('/', ctrl.listIntegrations);
+router.get('/google', ctrl.getGoogleWorkspace);
 router.post('/whatsapp/connect', ctrl.connectWhatsapp);
 router.post('/email/connect', ctrl.connectEmail);
 router.post('/cheerio/connect', ctrl.connectCheerio);

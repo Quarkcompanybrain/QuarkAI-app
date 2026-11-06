@@ -1,5 +1,6 @@
 import { api } from '../../lib/api';
 import type { Project, ProjectSource } from '../../types';
+import { listQuery } from '../../lib/listQuery';
 
 export interface ProjectMember {
   userId: string;
@@ -16,7 +17,11 @@ export interface WhatsAppMemoryChunk {
   chatJid: string | null;
   sender: string | null;
   messageTimestamp: string | null;
+  createdAt: string;
 }
+
+export type MemorySource = WhatsAppMemoryChunk['sourceType'];
+export type MemoryCounts = Record<MemorySource, number>;
 
 export const projectsApi = {
   list: () => api.get<{ projects: Project[] }>('/projects'),
@@ -49,8 +54,11 @@ export const projectsApi = {
   removeSource: (projectId: string, sourceId: string) =>
     api.delete<{ message: string }>(`/projects/${projectId}/sources/${sourceId}`),
 
-  listWhatsAppMemory: (projectId: string) =>
-    api.get<{ chunks: WhatsAppMemoryChunk[] }>(`/projects/${projectId}/whatsapp-memory`),
+  /** One page of knowledge, newest first. `counts` comes back on the first page only. */
+  listWhatsAppMemory: (projectId: string, params: { source?: MemorySource | null; q?: string; before?: string | null; limit?: number } = {}) =>
+    api.get<{ chunks: WhatsAppMemoryChunk[]; hasMore: boolean; counts?: MemoryCounts }>(
+      `/projects/${projectId}/whatsapp-memory${listQuery({ ...params })}`
+    ),
 
   updateChunk: (projectId: string, chunkId: string, text: string) =>
     api.patch<{ chunk: { id: string; text: string } }>(`/projects/${projectId}/chunks/${chunkId}`, { text }),

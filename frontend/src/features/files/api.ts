@@ -1,5 +1,6 @@
 import { api } from '../../lib/api';
 import type { FileItem } from '../../types';
+import { listQuery } from '../../lib/listQuery';
 
 export interface FileChunk {
   id: string;
@@ -7,8 +8,28 @@ export interface FileChunk {
   chunkIndex: number;
 }
 
+export type FileSourceFilter = 'upload' | 'whatsapp' | 'email';
+
+export interface FileCounts {
+  upload: number;
+  whatsapp: number;
+  email: number;
+  failed: number;
+}
+
+export interface FileListParams {
+  projectId?: string;
+  source?: FileSourceFilter | null;
+  status?: 'failed' | null;
+  q?: string;
+  before?: string | null;
+  limit?: number;
+}
+
 export const filesApi = {
-  list: (projectId?: string) => api.get<{ files: FileItem[] }>(`/files${projectId ? `?projectId=${projectId}` : ''}`),
+  /** One page, newest first. `counts` comes back on the first page only. */
+  list: (params: FileListParams = {}) =>
+    api.get<{ files: FileItem[]; hasMore: boolean; counts?: FileCounts }>(`/files${listQuery({ ...params })}`),
 
   upload: (file: File, projectId?: string) => {
     const form = new FormData();

@@ -97,83 +97,46 @@ function plural(count, word) {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
 }
 
-function reportList(title, items, color = '#0A0A0A') {
-  if (!items?.length) return '';
-  return `
-    <p style="margin:16px 0 6px;font-size:12px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;color:${color};">${escapeHtml(title)}</p>
-    <ul style="margin:0;padding-left:18px;font-size:14px;line-height:21px;color:#404040;">
-      ${items.map((item) => `<li style="margin-bottom:4px;">${escapeHtml(item)}</li>`).join('')}
-    </ul>`;
-}
-
-function reportStat(value, label) {
-  return `
-    <td style="padding:12px 8px;text-align:center;background:#FAFAFA;border:1px solid #EBEBEB;border-radius:12px;">
-      <div style="font-size:22px;font-weight:700;color:#0A0A0A;">${escapeHtml(value)}</div>
-      <div style="font-size:11px;color:#737373;margin-top:2px;">${escapeHtml(label)}</div>
-    </td>`;
-}
-
-function projectMetricsLine(metrics) {
-  const parts = [];
-  if (metrics.newMemories) parts.push(`${metrics.newMemories} new ${metrics.newMemories === 1 ? 'memory' : 'memories'}`);
-  if (metrics.updatedMemories) parts.push(`${metrics.updatedMemories} updated`);
-  if (metrics.whatsappMessages) parts.push(plural(metrics.whatsappMessages, 'WhatsApp message'));
-  if (metrics.emails) parts.push(plural(metrics.emails, 'email'));
-  if (metrics.files) parts.push(plural(metrics.files, 'file'));
-  if (metrics.failedFiles) parts.push(`${metrics.failedFiles} failed to process`);
-  if (metrics.chatQuestions) parts.push(plural(metrics.chatQuestions, 'chat question'));
-  return parts.join(' · ');
-}
-
-function dailyReportEmail({ orgName, reportDateLabel, appUrl, stats, executive, projects, quietProjects }) {
-  const attention = executive.attentionItems.length
+function dailyReportEmail({ orgName, reportDateLabel, appUrl, stats, topItems, projects, quietProjects }) {
+  const topList = topItems.length
     ? `
-      <div style="margin-top:20px;background:#FFF5FC;border:1px solid #FFD1F3;border-radius:12px;padding:16px 18px;">
-        <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;color:#C2109A;">Needs attention</p>
-        <ul style="margin:0;padding-left:18px;font-size:14px;line-height:21px;color:#404040;">
-          ${executive.attentionItems.map((entry) => `<li style="margin-bottom:4px;"><strong style="color:#0A0A0A;">${escapeHtml(entry.project)}:</strong> ${escapeHtml(entry.item)}</li>`).join('')}
-        </ul>
-      </div>`
-    : '';
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        ${topItems.map((item, index) => `
+        <tr>
+          <td style="width:28px;padding:10px 0;vertical-align:top;font-size:14px;font-weight:700;color:#FF1BCD;">${index + 1}.</td>
+          <td style="padding:10px 0;vertical-align:top;font-size:14px;line-height:21px;color:#262626;${index < topItems.length - 1 ? 'border-bottom:1px solid #F0F0F0;' : ''}">
+            <span style="display:inline-block;margin-right:6px;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;${item.action ? 'background:#FFE5F8;color:#C2109A;' : 'background:#F2F2F2;color:#737373;'}">${item.action ? 'Action' : 'Update'}</span>
+            <strong style="color:#0A0A0A;">${escapeHtml(item.project)}:</strong> ${escapeHtml(item.text)}
+          </td>
+        </tr>`).join('')}
+      </table>`
+    : '<p style="margin:0;font-size:14px;line-height:21px;color:#737373;">Nothing needs your attention today.</p>';
 
-  const projectCards = projects
+  const projectBriefs = projects
     .map((project) => `
-      <div style="margin-top:20px;border:1px solid #EBEBEB;border-radius:12px;padding:18px 20px;">
-        <a href="${escapeHtml(`${appUrl}/projects/${project.id}/memory`)}" style="font-size:16px;font-weight:700;color:#0A0A0A;text-decoration:none;">${escapeHtml(project.name)}</a>
-        <p style="margin:4px 0 0;font-size:12px;color:#A3A3A3;">${escapeHtml(projectMetricsLine(project.metrics))}</p>
-        <p style="margin:12px 0 0;font-size:14px;line-height:21px;color:#404040;">${escapeHtml(project.summary)}</p>
-        ${reportList('Highlights', project.highlights)}
-        ${reportList('Decisions', project.decisions)}
-        ${reportList('Risks & blockers', project.risks, '#C2109A')}
-        ${reportList('Next steps', project.nextSteps)}
+      <div style="margin-top:14px;">
+        <a href="${escapeHtml(`${appUrl}/projects/${project.id}/memory`)}" style="font-size:15px;font-weight:700;color:#0A0A0A;text-decoration:none;">${escapeHtml(project.name)}</a>
+        <p style="margin:4px 0 0;font-size:14px;line-height:21px;color:#404040;">${escapeHtml(project.brief.join(' '))}</p>
       </div>`)
     .join('');
 
   const quiet = quietProjects.length
-    ? `<p style="margin:20px 0 0;font-size:13px;line-height:19px;color:#A3A3A3;">No activity: ${quietProjects.map(escapeHtml).join(', ')}</p>`
+    ? `<p style="margin:16px 0 0;font-size:13px;line-height:19px;color:#A3A3A3;">No activity: ${quietProjects.map(escapeHtml).join(', ')}</p>`
     : '';
 
   return {
     subject: `${orgName} daily brief — ${reportDateLabel}`,
     html: emailLayout({
       maxWidth: 640,
-      preheader: escapeHtml(executive.summary.slice(0, 140)),
+      preheader: escapeHtml((topItems[0] ? `${topItems[0].project}: ${topItems[0].text}` : `${plural(stats.activeProjectCount, 'active project')} today`).slice(0, 140)),
       bodyHtml: `
         <p style="margin:0 0 4px;font-size:12px;color:#A3A3A3;">${escapeHtml(reportDateLabel)}</p>
-        <h1 style="margin:0 0 20px;font-size:20px;font-weight:700;color:#0A0A0A;letter-spacing:-0.3px;">${escapeHtml(orgName)} daily brief</h1>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="6" style="margin:0 -6px;">
-          <tr>
-            ${reportStat(stats.activeProjectCount, 'active projects')}
-            ${reportStat(stats.newMemoryCount + stats.updatedMemoryCount, 'memories captured')}
-            ${reportStat(stats.whatsappMessageCount + stats.emailCount, 'messages')}
-            ${reportStat(stats.fileCount, 'files')}
-          </tr>
-        </table>
-        <p style="margin:20px 0 6px;font-size:12px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;color:#0A0A0A;">Executive summary</p>
-        <p style="margin:0;font-size:15px;line-height:23px;color:#262626;">${escapeHtml(executive.summary)}</p>
-        ${attention}
-        ${projectCards}
+        <h1 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#0A0A0A;letter-spacing:-0.3px;">${escapeHtml(orgName)} daily brief</h1>
+        <p style="margin:0 0 20px;font-size:13px;color:#737373;">${escapeHtml(`${plural(stats.activeProjectCount, 'active project')} · ${plural(stats.whatsappMessageCount + stats.emailCount, 'message')} · ${plural(stats.fileCount, 'file')}`)}</p>
+        <p style="margin:0 0 4px;font-size:12px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;color:#0A0A0A;">Executive summary</p>
+        ${topList}
+        <p style="margin:24px 0 0;font-size:12px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;color:#0A0A0A;">Projects</p>
+        ${projectBriefs}
         ${quiet}
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:28px;">
           <tr>

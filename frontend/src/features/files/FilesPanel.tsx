@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { filesApi, type FileChunk } from './api';
+import { filesApi, type FileChunk, type FileCounts, type FileSourceFilter } from './api';
 import { projectsApi } from '../projects/api';
 import type { FileItem, FileStatus } from '../../types';
 import { PulseNode } from '../../components/PulseNode';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { EmptyState } from '../../components/EmptyState';
-import { EyeIcon, FileTextIcon, PencilIcon, TrashIcon, UploadIcon } from '../../components/icons';
+import { ListFooter } from '../../components/ListFooter';
+import { ListToolbar, type FilterChip } from '../../components/ListToolbar';
+import { usePagedList, useDebounced } from '../../hooks/usePagedList';
+import { dayLabel } from '../../lib/listQuery';
+import { ChatBubbleIcon, EyeIcon, FileTextIcon, MailIcon, PaperclipIcon, PencilIcon, TrashIcon, UploadIcon } from '../../components/icons';
+
+type FileFilter = FileSourceFilter | 'failed';
 
 const STATUS_LABEL: Record<FileStatus, string> = {
   pending: 'Queued',
@@ -22,43 +28,71 @@ const STATUS_STYLE: Record<FileStatus, string> = {
   failed: 'bg-magenta-50 text-magenta-600',
 };
 
-export function FilesPanel({ projectId, canManageChunks = false }: { projectId?: string; canManageChunks?: boolean }) {
-  const [files, setFiles] = useState<FileItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
+const PAGE_SIZE = 30;
+
+/**
+ * Files for a project (uploads plus WhatsApp and email attachments) or the
+ * user's personal files. Paged, searchable by name and filterable by source.
+ * `onCounts` reports the first page's totals, e.g. for a tab badge.
+ */
+export function FilesPanel({
+  projectId,
+  canManageChunks = false,
+  showHeading = true,
+  onCounts,
+}: {
+  projectId?: string;
+  canManageChunks?: boolean;
+  showHeading?: boolean;
+  onCounts?: (counts: FileCounts) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<FileFilter | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const query = useDebounced(search.trim());
 
-  const refresh = useCallback(() => {
-    filesApi
-      .list(projectId)
-      .then((r) => setFiles(r.files))
-      .catch((err) => setError(err.message));
-  }, [projectId]);
+  const { items: files, hasMore, counts, loadMore, loadingMore, reload, error } = usePagedList<FileItem, FileCounts>(
+    async (before, limit) => {
+      const res = await filesApi.list({
+        projectId,
+        source: filter && filter !== 'failed' ? filter : null,
+        status: filter === 'failed' ? 'failed' : null,
+        q: query,
+        before,
+        limit,
+      });
+      return { items: res.files, hasMore: res.hasMore, counts: res.counts };
+    },
+    `${projectId}|${filter}|${query}`,
+    PAGE_SIZE
+  );
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (counts) onCounts?.(counts);
+  }, [counts, onCounts]);
 
   // Poll while anything is still processing — no websocket needed for a simple status field.
   useEffect(() => {
-    const hasActive = files.some((f) => f.status === 'pending' || f.status === 'in_progress');
+    const hasActive = files?.some((f) => f.status === 'pending' || f.status === 'in_progress');
     if (!hasActive) return;
-    const id = setInterval(refresh, 3000);
+    const id = setInterval(reload, 3000);
     return () => clearInterval(id);
-  }, [files, refresh]);
+  }, [files, reload]);
 
   const handleFileSelect = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     setUploading(true);
-    setError(null);
+    setUploadError(null);
     try {
       for (const file of Array.from(fileList)) {
         await filesApi.upload(file, projectId);
       }
-      refresh();
+      reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed.');
+      setUploadError(err instanceof Error ? err.message : 'Upload failed.');
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
@@ -70,6 +104,26 @@ export function FilesPanel({ projectId, canManageChunks = false }: { projectId?:
     setDragActive(false);
     handleFileSelect(e.dataTransfer.files);
   };
+
+  const total = counts ? counts.upload + counts.whatsapp + counts.email : null;
+  const chips: FilterChip<FileFilter>[] = counts
+    ? [
+        { value: null, label: 'All', count: total ?? undefined },
+        ...(counts.upload ? [{ value: 'upload' as const, label: 'Uploaded', count: counts.upload, icon: <UploadIcon className="h-3 w-3" /> }] : []),
+        ...(counts.whatsapp ? [{ value: 'whatsapp' as const, label: 'WhatsApp', count: counts.whatsapp, icon: <ChatBubbleIcon className="h-3 w-3" /> }] : []),
+        ...(counts.email ? [{ value: 'email' as const, label: 'Email', count: counts.email, icon: <MailIcon className="h-3 w-3" /> }] : []),
+        ...(counts.failed ? [{ value: 'failed' as const, label: 'Failed', count: counts.failed, tone: 'alert' as const }] : []),
+      ]
+    : [];
+  const filtering = Boolean(query || filter);
+
+  const uploadButton = (
+    <label className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-neutral-700">
+      <UploadIcon className="h-3.5 w-3.5" />
+      {uploading ? 'Uploading…' : 'Upload'}
+      <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleFileSelect(e.target.files)} />
+    </label>
+  );
 
   return (
     <div
@@ -83,44 +137,52 @@ export function FilesPanel({ projectId, canManageChunks = false }: { projectId?:
       }}
       onDrop={handleDrop}
     >
-      <div className="flex items-center justify-between">
-        <h2 className="font-display text-lg font-semibold text-ink">Files</h2>
-        <label className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-neutral-700">
-          <UploadIcon className="h-3.5 w-3.5" />
-          {uploading ? 'Uploading…' : 'Upload file'}
-          <input
-            ref={inputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => handleFileSelect(e.target.files)}
+      {showHeading && <h2 className="font-display text-lg font-semibold text-ink">Files</h2>}
+
+      {total === 0 && !filtering ? (
+        <>
+          <div className="flex justify-end">{uploadButton}</div>
+          <ErrorBanner message={uploadError || error} />
+          <EmptyState
+            icon={<UploadIcon className="h-5 w-5 text-magenta-500" />}
+            title="No files yet"
+            description="Drag and drop a file anywhere on this page, or use Upload, to make it searchable in chat."
           />
-        </label>
-      </div>
-
-      <ErrorBanner message={error} />
-
-      {files.length === 0 ? (
-        <EmptyState
-          icon={<UploadIcon className="h-5 w-5 text-magenta-500" />}
-          title="No files yet"
-          description="Drag and drop a file anywhere on this page, or use Upload file, to make it searchable in chat."
-        />
+        </>
       ) : (
-        <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150 shadow-xs">
-          <AnimatePresence initial={false}>
-            {files.map((f, i) => (
-              <motion.li
-                key={f.id}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, delay: Math.min(i * 0.03, 0.3), ease: [0.16, 1, 0.3, 1] }}
-              >
-                <FileRow file={f} projectId={projectId} canManageChunks={canManageChunks} />
-              </motion.li>
-            ))}
-          </AnimatePresence>
-        </ul>
+        <>
+          <ListToolbar
+            search={search}
+            onSearch={setSearch}
+            placeholder="Search files by name"
+            chips={chips}
+            active={filter}
+            onSelect={setFilter}
+            actions={uploadButton}
+          />
+          <ErrorBanner message={uploadError || error} />
+
+          {files === null ? (
+            <p className="flex items-center gap-2 text-sm text-neutral-500">
+              <PulseNode size={6} /> Loading…
+            </p>
+          ) : files.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-neutral-200 px-4 py-8 text-center text-sm text-neutral-500">
+              No files match{query ? ` “${query}”` : ' this filter'}.
+            </p>
+          ) : (
+            <>
+              <ul className="flex flex-col divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-150 shadow-xs">
+                {files.map((f) => (
+                  <li key={f.id}>
+                    <FileRow file={f} projectId={projectId} canManageChunks={canManageChunks} />
+                  </li>
+                ))}
+              </ul>
+              <ListFooter shown={files.length} total={filtering ? null : total} hasMore={hasMore} loading={loadingMore} onMore={loadMore} noun="files" />
+            </>
+          )}
+        </>
       )}
 
       <AnimatePresence>
@@ -205,15 +267,17 @@ function FileRow({ file, projectId, canManageChunks }: { file: FileItem; project
 
   return (
     <div className="group bg-white transition-colors hover:bg-neutral-25">
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-150 bg-neutral-50 text-neutral-400">
-            <FileTextIcon className="h-4 w-4" />
+            {file.sourceType === 'upload' ? <FileTextIcon className="h-4 w-4" /> : <PaperclipIcon className="h-4 w-4" />}
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-ink">{file.filename}</p>
-            {file.status === 'failed' && file.failureReason && (
+            <p className="truncate text-sm font-medium text-ink" title={file.filename}>{file.filename}</p>
+            {file.status === 'failed' && file.failureReason ? (
               <p className="truncate text-xs text-magenta-500">{file.failureReason}</p>
+            ) : (
+              <p className="truncate text-xs text-neutral-400">{fileContext(file)}</p>
             )}
           </div>
         </div>
@@ -236,10 +300,13 @@ function FileRow({ file, projectId, canManageChunks }: { file: FileItem; project
               </button>
             </span>
           )}
-          <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[file.status]}`}>
-            {(file.status === 'pending' || file.status === 'in_progress') && <PulseNode size={6} />}
-            {STATUS_LABEL[file.status]}
-          </span>
+          {/* "Ready" is the normal state, so only the exceptions get a badge. */}
+          {file.status !== 'done' && (
+            <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[file.status]}`}>
+              {(file.status === 'pending' || file.status === 'in_progress') && <PulseNode size={6} />}
+              {STATUS_LABEL[file.status]}
+            </span>
+          )}
         </div>
       </div>
 
@@ -292,4 +359,16 @@ function FileRow({ file, projectId, canManageChunks }: { file: FileItem; project
       </AnimatePresence>
     </div>
   );
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** e.g. "WhatsApp · Site team · Yesterday · 240 KB" */
+function fileContext(file: FileItem) {
+  const source = file.sourceType === 'whatsapp' ? 'WhatsApp' : file.sourceType === 'email' ? 'Email' : 'Uploaded';
+  return [source, file.sourceLabel, dayLabel(new Date(file.createdAt)), formatSize(file.sizeBytes)].filter(Boolean).join(' · ');
 }

@@ -36,6 +36,9 @@ export interface FileItem {
   status: FileStatus;
   failureReason: string | null;
   createdAt: string;
+  sourceType: 'upload' | 'whatsapp' | 'email';
+  /** WhatsApp chat or email subject the file was attached to; null for uploads. */
+  sourceLabel: string | null;
 }
 
 export type ChatScope = 'personal' | 'project';

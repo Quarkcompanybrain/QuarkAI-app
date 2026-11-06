@@ -1,4 +1,5 @@
 const Sentry = require('@sentry/node');
+const { Types } = require('mongoose');
 const File = require('../models/File');
 const Chunk = require('../models/Chunk');
 const ProjectMembership = require('../models/ProjectMembership');
@@ -7,6 +8,7 @@ const { SUPPORTED_MIME_TYPES } = require('../services/file_handlers/registry');
 const { processFile } = require('../services/processing/processFile');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
+const { parseListQuery, findPage } = require('../utils/listQuery');
 
 const uploadFile = asyncHandler(async (req, res) => {
   if (!req.file) throw new ApiError(400, 'No file uploaded.');
@@ -50,16 +52,49 @@ const uploadFile = asyncHandler(async (req, res) => {
   res.status(201).json({ file: { id: file._id, filename: file.filename, status: file.status } });
 });
 
+const FILE_SOURCES = ['upload', 'whatsapp', 'email'];
+
+/** Where a file came from, for the list: the WhatsApp chat or email it was attached to. */
+function fileSourceLabel(file) {
+  if (file.sourceType === 'whatsapp') return file.whatsapp?.chatName || file.whatsapp?.senderName || 'WhatsApp';
+  if (file.sourceType === 'email') return file.email?.subject || file.email?.from || 'Email';
+  return null;
+}
+
+// Paged newest first, with optional ?source=upload|whatsapp|email,
+// ?status=failed and ?q= filename search. The first page also carries totals
+// per source and of failed files, for the filter chips.
 const listFiles = asyncHandler(async (req, res) => {
   const { projectId } = req.query;
+  const page = parseListQuery(req.query);
 
-  const filter = projectId
+  const scope = projectId
     ? { orgId: req.org.id, projectId }
     : { orgId: req.org.id, projectId: null, ownerId: req.user.id };
+  const filter = { ...scope };
+  if (FILE_SOURCES.includes(req.query.source)) filter.sourceType = req.query.source;
+  if (req.query.status === 'failed') filter.status = 'failed';
+  if (page.search) filter.filename = page.search;
 
-  const files = await File.find(filter).sort({ createdAt: -1 });
+  const [{ rows, hasMore }, countRows] = await Promise.all([
+    findPage(File, filter, page),
+    page.before
+      ? null
+      : File.aggregate([
+          // aggregate() doesn't cast ids or apply the soft-delete filter, so both are explicit here.
+          {
+            $match: {
+              orgId: new Types.ObjectId(String(req.org.id)),
+              ...(projectId ? { projectId: new Types.ObjectId(String(projectId)) } : { projectId: null, ownerId: new Types.ObjectId(String(req.user.id)) }),
+              deletedAt: null,
+            },
+          },
+          { $group: { _id: '$sourceType', count: { $sum: 1 }, failed: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } } } },
+        ]),
+  ]);
+
   res.json({
-    files: files.map((f) => ({
+    files: rows.map((f) => ({
       id: f._id,
       filename: f.filename,
       mimeType: f.mimeType,
@@ -67,7 +102,19 @@ const listFiles = asyncHandler(async (req, res) => {
       status: f.status,
       failureReason: f.failureReason,
       createdAt: f.createdAt,
+      sourceType: f.sourceType || 'upload',
+      sourceLabel: fileSourceLabel(f),
     })),
+    hasMore,
+    ...(countRows
+      ? {
+          counts: {
+            // Files created before sourceType existed have no value and are uploads.
+            ...Object.fromEntries(FILE_SOURCES.map((source) => [source, countRows.filter((row) => (row._id || 'upload') === source).reduce((total, row) => total + row.count, 0)])),
+            failed: countRows.reduce((total, row) => total + row.failed, 0),
+          },
+        }
+      : {}),
   });
 });
 

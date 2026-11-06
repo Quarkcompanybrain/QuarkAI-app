@@ -1,4 +1,5 @@
 const Sentry = require('@sentry/node');
+const { Types } = require('mongoose');
 const ProjectSource = require('../models/ProjectSource');
 const Integration = require('../models/Integration');
 const WhatsAppChat = require('../models/WhatsAppChat');
@@ -6,6 +7,7 @@ const WhatsAppMessage = require('../models/WhatsAppMessage');
 const Chunk = require('../models/Chunk');
 const { ApiError } = require('../utils/ApiError');
 const { asyncHandler } = require('../utils/asyncHandler');
+const { parseListQuery, findPage } = require('../utils/listQuery');
 
 const MAX_SOURCES_PER_PROJECT = 10;
 
@@ -97,31 +99,59 @@ const removeSource = asyncHandler(async (req, res) => {
   res.json({ message: 'Removed.' });
 });
 
+/** A readable sender for a raw WhatsApp id like "919876543210@s.whatsapp.net"; group/LID ids are hidden. */
+function whatsappPhone(jid) {
+  const match = /^\+?(\d{6,15})(@s\.whatsapp\.net)?$/.exec(jid || '');
+  return match ? `+${match[1]}` : null;
+}
+
 function chunkSourceLabels(chunk) {
   if (chunk.sourceType === 'email') return { chatName: chunk.metadata?.emailSubject || chunk.metadata?.mailbox || null, sender: chunk.metadata?.emailFrom || null };
   if (chunk.sourceType === 'cheerio') {
     return { chatName: chunk.metadata?.cheerioConnection || 'Cheerio', sender: chunk.metadata?.contactName || chunk.metadata?.contactPhone || null };
   }
-  return { chatName: chunk.metadata?.chatName || null, sender: chunk.metadata?.sender || null };
+  return { chatName: chunk.metadata?.chatName || null, sender: chunk.metadata?.senderName || whatsappPhone(chunk.metadata?.senderPhoneNumber || chunk.metadata?.sender) };
 }
+
+const MEMORY_SOURCES = ['whatsapp', 'email', 'cheerio'];
 
 // Actual ingested WhatsApp, email and Cheerio knowledge for the project's
 // Memory tab — distinct from listSources (which chats/mailboxes/connections
-// are picked), this is what got saved from them.
+// are picked), this is what got saved from them. Paged newest first, with
+// optional ?source=whatsapp|email|cheerio and ?q= text search; the first
+// page also carries per-source totals for the filter chips.
 const listWhatsAppMemory = asyncHandler(async (req, res) => {
-  const chunks = await Chunk.find({ projectId: req.projectId, sourceType: { $in: ['whatsapp', 'email', 'cheerio'] } })
-    .sort({ createdAt: -1 })
-    .limit(100);
+  const page = parseListQuery(req.query);
+  const scope = { orgId: req.org.id, projectId: req.projectId, sourceType: { $in: MEMORY_SOURCES } };
+  const filter = { ...scope };
+  if (MEMORY_SOURCES.includes(req.query.source)) filter.sourceType = req.query.source;
+  if (page.search) {
+    filter.$or = ['text', 'metadata.chatName', 'metadata.senderName', 'metadata.emailSubject', 'metadata.emailFrom', 'metadata.contactName'].map((field) => ({ [field]: page.search }));
+  }
+
+  const [{ rows, hasMore }, countRows] = await Promise.all([
+    findPage(Chunk, filter, page),
+    page.before
+      ? null
+      : Chunk.aggregate([
+          // aggregate() doesn't cast ids or apply the soft-delete filter, so both are explicit here.
+          { $match: { ...scope, orgId: new Types.ObjectId(String(scope.orgId)), projectId: new Types.ObjectId(String(scope.projectId)), deletedAt: null } },
+          { $group: { _id: '$sourceType', count: { $sum: 1 } } },
+        ]),
+  ]);
 
   res.json({
-    chunks: chunks.map((c) => ({
+    chunks: rows.map((c) => ({
       id: c._id,
       sourceType: c.sourceType,
       text: c.text,
       ...chunkSourceLabels(c),
       chatJid: c.metadata?.chatJid || null,
       messageTimestamp: c.metadata?.messageTimestamp || null,
+      createdAt: c.createdAt,
     })),
+    hasMore,
+    ...(countRows ? { counts: Object.fromEntries(MEMORY_SOURCES.map((source) => [source, countRows.find((row) => row._id === source)?.count || 0])) } : {}),
   });
 });
 
